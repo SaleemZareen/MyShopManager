@@ -26,3 +26,9 @@ app/build/
 .build-outputs/
 APK_DOWNLOAD/
 local.properties
+*.apk
+*.aab
+*.dex
+*.class
+*.flat
+.dev.env.json

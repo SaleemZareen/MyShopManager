@@ -688,34 +688,33 @@ fun QuickActionButton(
     Surface(
         onClick = onClick,
         color = Color.White,
-        shape = RoundedCornerShape(12.dp),
-        border = BorderStroke(1.dp, Slate200),
-        modifier = modifier.height(52.dp)
+        shape = RoundedCornerShape(14.dp),
+        border = BorderStroke(1.dp, iconTint.copy(alpha = 0.25f)),
+        shadowElevation = 0.5.dp,
+        modifier = modifier.height(56.dp)
     ) {
         Row(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 6.dp, vertical = 4.dp),
+                .background(iconTint.copy(alpha = 0.04f))
+                .padding(horizontal = 6.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = title,
-                tint = iconTint,
-                modifier = Modifier.size(18.dp)
-            )
-
-            Spacer(modifier = Modifier.width(4.dp))
-
-            // Vertical divider
             Box(
                 modifier = Modifier
-                    .width(1.dp)
-                    .height(24.dp)
-                    .background(Slate200)
-            )
+                    .size(32.dp)
+                    .background(iconTint.copy(alpha = 0.12f), CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = title,
+                    tint = iconTint,
+                    modifier = Modifier.size(17.dp)
+                )
+            }
 
-            Spacer(modifier = Modifier.width(4.dp))
+            Spacer(modifier = Modifier.width(6.dp))
 
             Column(
                 modifier = Modifier.weight(1f),
@@ -724,7 +723,7 @@ fun QuickActionButton(
                 Text(
                     text = title,
                     fontWeight = FontWeight.Bold,
-                    fontSize = 10.sp,
+                    fontSize = 11.sp,
                     color = Slate900,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
@@ -732,7 +731,7 @@ fun QuickActionButton(
                 Text(
                     text = subtitle,
                     fontWeight = FontWeight.Normal,
-                    fontSize = 8.sp,
+                    fontSize = 8.5.sp,
                     color = Slate500,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis

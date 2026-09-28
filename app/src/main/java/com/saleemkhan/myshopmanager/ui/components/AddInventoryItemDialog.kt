@@ -24,7 +24,9 @@ fun AddInventoryItemDialog(
     isOpen: Boolean,
     onClose: () -> Unit,
     onAddItem: (InventoryItem) -> Unit,
-    isUrdu: Boolean
+    isUrdu: Boolean,
+    initialBarcode: String = "",
+    inventory: List<InventoryItem> = emptyList()
 ) {
     if (!isOpen) return
 
@@ -35,7 +37,8 @@ fun AddInventoryItemDialog(
     var quantity by remember { mutableStateOf("") }
     var unit by remember { mutableStateOf(if (isUrdu) "عدد" else "pcs") }
     var minStockAlert by remember { mutableStateOf("5") }
-    var barcode by remember { mutableStateOf("") }
+    var barcode by remember(initialBarcode) { mutableStateOf(initialBarcode) }
+    var isInnerScannerOpen by remember { mutableStateOf(false) }
 
     Dialog(onDismissRequest = onClose) {
         Card(
@@ -88,13 +91,26 @@ fun AddInventoryItemDialog(
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.weight(1f)
                     )
+
+                    // Barcode field with Scan Camera icon button!
                     OutlinedTextField(
                         value = barcode,
                         onValueChange = { barcode = it },
                         label = { Text(if (isUrdu) "بارکوڈ" else "Barcode / SKU") },
+                        placeholder = { Text("Scan / Type") },
                         singleLine = true,
+                        trailingIcon = {
+                            IconButton(onClick = { isInnerScannerOpen = true }) {
+                                Icon(
+                                    imageVector = Icons.Default.QrCodeScanner,
+                                    contentDescription = "Scan Barcode",
+                                    tint = DukanGreenPrimary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        },
                         shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.weight(1.3f)
                     )
                 }
 
@@ -177,5 +193,31 @@ fun AddInventoryItemDialog(
                 }
             }
         }
+    }
+
+    // Inner Barcode Scanner when tapping the camera icon
+    if (isInnerScannerOpen) {
+        BarcodeScannerDialog(
+            isOpen = isInnerScannerOpen,
+            onClose = { isInnerScannerOpen = false },
+            inventory = inventory,
+            onItemScanned = { scannedItem ->
+                barcode = scannedItem.barcode ?: scannedItem.sku ?: ""
+                if (name.isBlank()) name = scannedItem.name
+                if (category.isBlank()) category = scannedItem.category
+                if (costPrice.isBlank()) costPrice = scannedItem.purchasePrice.toString()
+                if (sellingPrice.isBlank()) sellingPrice = scannedItem.salePrice.toString()
+                isInnerScannerOpen = false
+            },
+            onManualCodeEntered = { manualCode ->
+                barcode = manualCode
+                isInnerScannerOpen = false
+            },
+            onAddNewItemWithBarcode = { code ->
+                barcode = code
+                isInnerScannerOpen = false
+            },
+            isUrdu = isUrdu
+        )
     }
 }

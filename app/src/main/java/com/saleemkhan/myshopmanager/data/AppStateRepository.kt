@@ -16,8 +16,13 @@ class AppStateRepository private constructor(context: Context) {
     private val _appState = MutableStateFlow(loadState())
     val appState: StateFlow<AppState> = _appState.asStateFlow()
 
+    private val _dismissedNotifications = MutableStateFlow(loadDismissedNotifications())
+    val dismissedNotifications: StateFlow<Set<String>> = _dismissedNotifications.asStateFlow()
+
     companion object {
         private const val STORAGE_KEY = "my_shop_manager_app_state_v2"
+        private const val DISMISSED_NOTIFS_KEY = "my_shop_dismissed_notifs"
+        private const val PERMISSIONS_SETUP_DONE_KEY = "permissions_setup_done"
 
         @Volatile
         private var INSTANCE: AppStateRepository? = null
@@ -27,6 +32,41 @@ class AppStateRepository private constructor(context: Context) {
                 INSTANCE ?: AppStateRepository(context.applicationContext).also { INSTANCE = it }
             }
         }
+    }
+
+    private fun loadDismissedNotifications(): Set<String> {
+        return try {
+            prefs.getStringSet(DISMISSED_NOTIFS_KEY, emptySet()) ?: emptySet()
+        } catch (e: Exception) {
+            emptySet()
+        }
+    }
+
+    fun dismissNotification(id: String) {
+        val current = _dismissedNotifications.value.toMutableSet()
+        current.add(id)
+        prefs.edit().putStringSet(DISMISSED_NOTIFS_KEY, current).apply()
+        _dismissedNotifications.value = current
+    }
+
+    fun dismissAllNotifications(ids: Collection<String>) {
+        val current = _dismissedNotifications.value.toMutableSet()
+        current.addAll(ids)
+        prefs.edit().putStringSet(DISMISSED_NOTIFS_KEY, current).apply()
+        _dismissedNotifications.value = current
+    }
+
+    fun clearDismissedNotifications() {
+        prefs.edit().remove(DISMISSED_NOTIFS_KEY).apply()
+        _dismissedNotifications.value = emptySet()
+    }
+
+    fun isPermissionsSetupDone(): Boolean {
+        return prefs.getBoolean(PERMISSIONS_SETUP_DONE_KEY, false)
+    }
+
+    fun setPermissionsSetupDone(done: Boolean) {
+        prefs.edit().putBoolean(PERMISSIONS_SETUP_DONE_KEY, done).apply()
     }
 
     private fun loadState(): AppState {
@@ -62,5 +102,18 @@ class AppStateRepository private constructor(context: Context) {
 
     fun resetState() {
         saveState(FormatUtils.DEFAULT_APP_STATE)
+    }
+
+    fun importJson(json: String): Boolean {
+        return try {
+            val parsed = gson.fromJson(json, AppState::class.java)
+            if (parsed != null) {
+                saveState(parsed)
+                true
+            } else false
+        } catch (e: Exception) {
+            e.printStackTrace()
+            false
+        }
     }
 }

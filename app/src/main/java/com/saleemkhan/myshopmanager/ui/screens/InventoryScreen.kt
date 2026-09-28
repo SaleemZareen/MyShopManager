@@ -23,8 +23,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
-import com.saleemkhan.myshopmanager.model.AppState
-import com.saleemkhan.myshopmanager.model.InventoryItem
+import com.saleemkhan.myshopmanager.model.*
+import com.saleemkhan.myshopmanager.ui.components.BarcodeScannerDialog
+import com.saleemkhan.myshopmanager.ui.components.SaleInventoryItemDialog
 import com.saleemkhan.myshopmanager.ui.theme.*
 import com.saleemkhan.myshopmanager.utils.FormatUtils
 
@@ -35,10 +36,27 @@ fun InventoryScreen(
     isUrdu: Boolean,
     onAddItem: (InventoryItem) -> Unit,
     onUpdateQty: (String, Double) -> Unit,
-    onDeleteItem: (String) -> Unit
+    onDeleteItem: (String) -> Unit,
+    onOpenScanner: (() -> Unit)? = null,
+    onSaleItem: ((
+        item: InventoryItem,
+        qty: Double,
+        unitPrice: Double,
+        discount: Double,
+        netAmount: Double,
+        customer: CustomerParty?,
+        newCustomerName: String?,
+        newCustomerPhone: String?,
+        paymentMethod: PaymentMethod,
+        accountId: String?,
+        notes: String?
+    ) -> Unit)? = null
 ) {
     var search by remember { mutableStateOf("") }
     var showAddDialog by remember { mutableStateOf(false) }
+    var showBarcodeScanner by remember { mutableStateOf(false) }
+    var prefilledBarcode by remember { mutableStateOf("") }
+    var selectedSaleItem by remember { mutableStateOf<InventoryItem?>(null) }
 
     val totalValuation = remember(state.inventory) {
         state.inventory.sumOf { it.quantity * it.purchasePrice }
@@ -53,7 +71,8 @@ fun InventoryScreen(
             search.isBlank() ||
                     it.name.contains(search, ignoreCase = true) ||
                     it.category.contains(search, ignoreCase = true) ||
-                    (it.barcode?.contains(search) == true)
+                    (it.barcode?.contains(search, ignoreCase = true) == true) ||
+                    (it.sku?.contains(search, ignoreCase = true) == true)
         }
     }
 
@@ -61,8 +80,56 @@ fun InventoryScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(Slate50)
-            .padding(horizontal = 12.dp, vertical = 8.dp)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
+        // ==========================================
+        // 1. PAGE HEADING: Stock & Inventory Management
+        // ==========================================
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = Color.White),
+            border = BorderStroke(1.dp, Slate200),
+            elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(42.dp)
+                        .background(DukanGreenLight, RoundedCornerShape(12.dp)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Inventory2,
+                        contentDescription = "Stock & Inventory",
+                        tint = DukanGreenPrimary,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Stock & Inventory Management",
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 15.sp,
+                        color = Slate900
+                    )
+                    Text(
+                        text = if (isUrdu) "دکان کے سامان کا اسٹاک، خریداری لاگت، بارکوڈ اور انوینٹری کنٹرول" else "Real-time stock valuation, barcode tracking and alerts",
+                        fontSize = 10.5.sp,
+                        color = Slate500
+                    )
+                }
+            }
+        }
+
         // KPI strip
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -113,9 +180,10 @@ fun InventoryScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(10.dp))
-
-        // Search & Add Item
+        // ==========================================
+        // 2. SEARCH BAR WITH EMBEDDED BARCODE SCANNER & ADD BUTTON
+        // Placeholder: "Search by item name, category or barcode.."
+        // ==========================================
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -124,8 +192,62 @@ fun InventoryScreen(
             OutlinedTextField(
                 value = search,
                 onValueChange = { search = it },
-                placeholder = { Text(if (isUrdu) "اسٹاک آئٹم یا بارکوڈ تلاش کریں..." else "Search stock or barcode...", fontSize = 12.sp) },
-                leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Search", tint = Slate400) },
+                placeholder = {
+                    Text(
+                        text = "Search by item name, category or barcode..",
+                        fontSize = 11.5.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Default.Search,
+                        contentDescription = "Search",
+                        tint = Slate400,
+                        modifier = Modifier.size(20.dp)
+                    )
+                },
+                trailingIcon = {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(end = 4.dp)
+                    ) {
+                        if (search.isNotEmpty()) {
+                            IconButton(
+                                onClick = { search = "" },
+                                modifier = Modifier.size(30.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Clear",
+                                    tint = Slate400,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+                        // Embedded Barcode Scanner inside Search Bar
+                        IconButton(
+                            onClick = {
+                                if (onOpenScanner != null) {
+                                    onOpenScanner()
+                                } else {
+                                    showBarcodeScanner = true
+                                }
+                            },
+                            modifier = Modifier
+                                .size(34.dp)
+                                .background(DukanGreenLight, RoundedCornerShape(8.dp))
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.QrCodeScanner,
+                                contentDescription = "Scan Barcode",
+                                tint = DukanGreenPrimary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+                },
                 singleLine = true,
                 shape = RoundedCornerShape(14.dp),
                 colors = OutlinedTextFieldDefaults.colors(
@@ -137,25 +259,44 @@ fun InventoryScreen(
                 modifier = Modifier.weight(1f)
             )
 
+            // Add Item Button
             Button(
-                onClick = { showAddDialog = true },
+                onClick = {
+                    prefilledBarcode = ""
+                    showAddDialog = true
+                },
                 colors = ButtonDefaults.buttonColors(containerColor = DukanGreenPrimary),
                 shape = RoundedCornerShape(14.dp),
-                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                 modifier = Modifier.height(52.dp)
             ) {
                 Icon(Icons.Default.Add, contentDescription = "Add", modifier = Modifier.size(18.dp))
                 Spacer(modifier = Modifier.width(4.dp))
-                Text(text = if (isUrdu) "نیا آئٹم" else "Add Item", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                Text(
+                    text = if (isUrdu) "نیا آئٹم" else "Add Item",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 11.5.sp
+                )
             }
         }
-
-        Spacer(modifier = Modifier.height(10.dp))
 
         // Items List
         if (filteredItems.isEmpty()) {
             Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                Text(text = if (isUrdu) "کوئی اسٹاک آئٹم نہیں ملا" else "No inventory items found", color = Slate500, fontSize = 13.sp)
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(
+                        imageVector = Icons.Default.Inventory2,
+                        contentDescription = "Empty",
+                        tint = Slate300,
+                        modifier = Modifier.size(48.dp)
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = if (isUrdu) "کوئی اسٹاک آئٹم نہیں ملا" else "No inventory items found",
+                        color = Slate500,
+                        fontSize = 13.sp
+                    )
+                }
             }
         } else {
             LazyColumn(
@@ -212,12 +353,26 @@ fun InventoryScreen(
                                         fontSize = 10.sp,
                                         color = Slate500
                                     )
+                                    // Prominent Barcode indicator under each item
                                     if (!item.barcode.isNullOrBlank()) {
-                                        Text(
-                                            text = "Barcode: ${item.barcode}",
-                                            fontSize = 9.sp,
-                                            color = Slate400
-                                        )
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier.padding(top = 2.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.QrCodeScanner,
+                                                contentDescription = "Barcode",
+                                                tint = DukanGreenPrimary,
+                                                modifier = Modifier.size(11.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(3.dp))
+                                            Text(
+                                                text = "Barcode: ${item.barcode}",
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.Medium,
+                                                color = Slate600
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -241,6 +396,27 @@ fun InventoryScreen(
                                     )
                                 }
 
+                                // Sale / Less Button
+                                Button(
+                                    onClick = { selectedSaleItem = item },
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = DukanGreenLight,
+                                        contentColor = DukanGreenHover
+                                    ),
+                                    border = BorderStroke(1.dp, GreenSuccessBorder),
+                                    shape = RoundedCornerShape(10.dp),
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                                    modifier = Modifier.height(32.dp)
+                                ) {
+                                    Icon(Icons.Default.PointOfSale, contentDescription = "Sale", modifier = Modifier.size(14.dp))
+                                    Spacer(modifier = Modifier.width(3.dp))
+                                    Text(
+                                        text = if (isUrdu) "فروخت" else "Sale",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 11.sp
+                                    )
+                                }
+
                                 IconButton(
                                     onClick = { onDeleteItem(item.id) },
                                     modifier = Modifier.size(28.dp)
@@ -249,7 +425,7 @@ fun InventoryScreen(
                                         imageVector = Icons.Default.DeleteOutline,
                                         contentDescription = "Delete",
                                         tint = Slate400,
-                                        modifier = Modifier.size(16.dp)
+                                        modifier = Modifier.size(18.dp)
                                     )
                                 }
                             }
@@ -259,39 +435,82 @@ fun InventoryScreen(
             }
         }
 
-        // Add Product Dialog
+        // Add Product Dialog (Supports pre-filled barcode)
         if (showAddDialog) {
             var name by remember { mutableStateOf("") }
-            var category by remember { mutableStateOf("General") }
-            var qty by remember { mutableStateOf("1") }
-            var unit by remember { mutableStateOf("pcs") }
+            var category by remember { mutableStateOf("") }
             var purchasePrice by remember { mutableStateOf("") }
             var salePrice by remember { mutableStateOf("") }
+            var qty by remember { mutableStateOf("1") }
+            var unit by remember { mutableStateOf(if (isUrdu) "عدد" else "pcs") }
             var minAlert by remember { mutableStateOf("5") }
-            var barcode by remember { mutableStateOf("") }
+            var itemBarcode by remember(prefilledBarcode) { mutableStateOf(prefilledBarcode) }
+            var isScanningForField by remember { mutableStateOf(false) }
 
             Dialog(onDismissRequest = { showAddDialog = false }) {
                 Card(
-                    shape = RoundedCornerShape(20.dp),
+                    shape = RoundedCornerShape(24.dp),
                     colors = CardDefaults.cardColors(containerColor = Color.White),
-                    modifier = Modifier.fillMaxWidth().padding(16.dp)
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 14.dp)
                 ) {
                     Column(
-                        modifier = Modifier.padding(16.dp).verticalScroll(rememberScrollState()),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(18.dp)
+                            .verticalScroll(rememberScrollState()),
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        Text(
-                            text = if (isUrdu) "نیا پروڈکٹ / اسٹاک شامل کریں" else "Add New Stock Product",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 15.sp,
-                            color = Slate900
-                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = if (isUrdu) "نیا پروڈکٹ درج کریں" else "Add New Inventory Item",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 16.sp,
+                                color = Slate900
+                            )
+                            IconButton(onClick = { showAddDialog = false }, modifier = Modifier.size(28.dp)) {
+                                Icon(Icons.Default.Close, contentDescription = "Close", tint = Slate500)
+                            }
+                        }
 
                         OutlinedTextField(
                             value = name,
                             onValueChange = { name = it },
                             label = { Text(if (isUrdu) "پروڈکٹ کا نام" else "Product Name") },
                             singleLine = true,
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+
+                        OutlinedTextField(
+                            value = category,
+                            onValueChange = { category = it },
+                            label = { Text(if (isUrdu) "کیٹگری" else "Category") },
+                            singleLine = true,
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+
+                        // Barcode Field with Scan Camera button
+                        OutlinedTextField(
+                            value = itemBarcode,
+                            onValueChange = { itemBarcode = it },
+                            label = { Text(if (isUrdu) "بارکوڈ / SKU" else "Barcode / SKU") },
+                            placeholder = { Text("e.g. 896400012345") },
+                            singleLine = true,
+                            trailingIcon = {
+                                IconButton(onClick = { isScanningForField = true }) {
+                                    Icon(
+                                        imageVector = Icons.Default.QrCodeScanner,
+                                        contentDescription = "Scan Barcode",
+                                        tint = DukanGreenPrimary,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            },
                             shape = RoundedCornerShape(12.dp),
                             modifier = Modifier.fillMaxWidth()
                         )
@@ -335,9 +554,9 @@ fun InventoryScreen(
                         }
 
                         OutlinedTextField(
-                            value = barcode,
-                            onValueChange = { barcode = it },
-                            label = { Text(if (isUrdu) "بارکوڈ (اختیاری)" else "Barcode (Optional)") },
+                            value = minAlert,
+                            onValueChange = { minAlert = it },
+                            label = { Text(if (isUrdu) "کم اسٹاک الرٹ کی حد" else "Min Stock Alert") },
                             singleLine = true,
                             shape = RoundedCornerShape(12.dp),
                             modifier = Modifier.fillMaxWidth()
@@ -355,13 +574,13 @@ fun InventoryScreen(
                                         InventoryItem(
                                             id = "item_${System.currentTimeMillis()}",
                                             name = name,
-                                            category = category,
+                                            category = category.ifBlank { "General" },
                                             quantity = quantity,
                                             unit = unit,
                                             purchasePrice = cost,
                                             salePrice = sale,
                                             minStockAlert = alert,
-                                            barcode = barcode.ifBlank { null }
+                                            barcode = itemBarcode.ifBlank { null }
                                         )
                                     )
                                     showAddDialog = false
@@ -375,7 +594,78 @@ fun InventoryScreen(
                         }
                     }
                 }
+
+                // If user taps camera icon inside Add Product dialog
+                if (isScanningForField) {
+                    BarcodeScannerDialog(
+                        isOpen = isScanningForField,
+                        onClose = { isScanningForField = false },
+                        inventory = state.inventory,
+                        onItemScanned = { matched ->
+                            itemBarcode = matched.barcode ?: matched.sku ?: ""
+                            if (name.isBlank()) name = matched.name
+                            if (category.isBlank()) category = matched.category
+                            if (purchasePrice.isBlank()) purchasePrice = matched.purchasePrice.toString()
+                            if (salePrice.isBlank()) salePrice = matched.salePrice.toString()
+                            isScanningForField = false
+                        },
+                        onManualCodeEntered = { manualCode ->
+                            itemBarcode = manualCode
+                            isScanningForField = false
+                        },
+                        onAddNewItemWithBarcode = { code ->
+                            itemBarcode = code
+                            isScanningForField = false
+                        },
+                        isUrdu = isUrdu
+                    )
+                }
             }
+        }
+
+        // Local Barcode Scanner Dialog on Inventory Screen
+        if (showBarcodeScanner) {
+            BarcodeScannerDialog(
+                isOpen = showBarcodeScanner,
+                onClose = { showBarcodeScanner = false },
+                inventory = state.inventory,
+                onItemScanned = { matched ->
+                    search = matched.name
+                    showBarcodeScanner = false
+                },
+                onQuickSale = { matched ->
+                    showBarcodeScanner = false
+                    selectedSaleItem = matched
+                },
+                onQuickPurchase = { matched ->
+                    onUpdateQty(matched.id, matched.quantity + 1.0)
+                    showBarcodeScanner = false
+                },
+                onAddNewItemWithBarcode = { unmatchedBarcode ->
+                    showBarcodeScanner = false
+                    prefilledBarcode = unmatchedBarcode
+                    showAddDialog = true
+                },
+                isUrdu = isUrdu
+            )
+        }
+
+        // Single Item Stock Sale Modal (SaleInventoryItemDialog)
+        if (selectedSaleItem != null) {
+            SaleInventoryItemDialog(
+                item = selectedSaleItem,
+                inventoryList = state.inventory,
+                customers = state.customers,
+                bankAccounts = state.bankAccounts,
+                isOpen = selectedSaleItem != null,
+                onClose = { selectedSaleItem = null },
+                onConfirmSale = { itm, qty, unitPrice, discount, netAmount, customer, newName, newPhone, payMethod, accId, notes ->
+                    onSaleItem?.invoke(itm, qty, unitPrice, discount, netAmount, customer, newName, newPhone, payMethod, accId, notes)
+                    selectedSaleItem = null
+                },
+                isUrdu = isUrdu,
+                shopName = state.profile.shopName
+            )
         }
     }
 }

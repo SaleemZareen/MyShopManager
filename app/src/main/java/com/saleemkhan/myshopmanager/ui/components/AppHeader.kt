@@ -31,6 +31,7 @@ import com.saleemkhan.myshopmanager.R
 import com.saleemkhan.myshopmanager.model.*
 import com.saleemkhan.myshopmanager.ui.theme.*
 import com.saleemkhan.myshopmanager.utils.FormatUtils
+import com.saleemkhan.myshopmanager.utils.NotificationHelper
 
 data class HeaderNotification(
     val id: String,
@@ -63,74 +64,42 @@ fun AppHeader(
     onToggleStoreMode: (() -> Unit)?,
     onOpenQuickEntry: ((TransactionType) -> Unit)?,
     onNavigateScreen: (Screen) -> Unit,
-    onToggleMenu: () -> Unit
+    onToggleMenu: () -> Unit,
+    dismissedIds: Set<String> = emptySet(),
+    onDismissAllNotifs: ((List<String>) -> Unit)? = null
 ) {
     var showShopDropdown by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
     var showNotifMsg by remember { mutableStateOf(false) }
 
-    // Live notifications computation
-    val lowStockNotifs = remember(inventory) {
-        inventory.filter { it.quantity <= it.minStockAlert }.map { item ->
-            HeaderNotification(
-                id = "low_stock_${item.id}",
-                textEn = "Low Stock: ${item.name} (${item.quantity} ${item.unit} remaining, alert limit ${item.minStockAlert})",
-                textUr = "کم اسٹاک الرٹ: ${item.name} (${item.quantity} ${item.unit} باقی، حد ${item.minStockAlert} ہے)",
-                emoji = "⚠️",
-                bgColor = AmberWarningLight,
-                borderColor = AmberWarningBorder,
-                emojiColor = AmberWarning
-            )
-        }
+    // Live dynamic notifications synced with React Navbar.tsx
+    val tempAppState = remember(profile, inventory, customers, suppliers, loans) {
+        AppState(
+            profile = profile,
+            inventory = inventory,
+            customers = customers,
+            suppliers = suppliers,
+            loans = loans
+        )
     }
 
-    val highCreditNotifs = remember(customers) {
-        customers.filter { it.totalCredit > 10000 }.map { cust ->
-            HeaderNotification(
-                id = "high_credit_${cust.id}",
-                textEn = "High Udhaar Notice: ${cust.name} owes Rs. ${cust.totalCredit.toInt()}",
-                textUr = "زیادہ بقایا ادھار: ${cust.name} کے ذمے Rs. ${cust.totalCredit.toInt()} ہیں",
-                emoji = "💰",
-                bgColor = GreenSuccessLight,
-                borderColor = GreenSuccessBorder,
-                emojiColor = GreenSuccess
-            )
-        }
+    val dynamicNotifs = remember(tempAppState) {
+        NotificationHelper.generateNotifications(tempAppState)
     }
 
-    val supplierDueNotifs = remember(suppliers) {
-        suppliers.filter { it.totalPayable > 0 && !it.dueDate.isNullOrBlank() }.map { sup ->
-            HeaderNotification(
-                id = "supplier_due_${sup.id}",
-                textEn = "Due Supplier Payment: Rs. ${sup.totalPayable.toInt()} to ${sup.name}",
-                textUr = "واجب الادا سپلائر ادائیگی: Rs. ${sup.totalPayable.toInt()} برائے ${sup.name}",
-                emoji = "🚚",
-                bgColor = RedDangerLight,
-                borderColor = RedDangerBorder,
-                emojiColor = RedDanger
-            )
-        }
+    val activeUnreadNotifs = remember(dynamicNotifs, dismissedIds) {
+        dynamicNotifs.filter { it.id !in dismissedIds }
     }
 
-    val allNotifs = remember(lowStockNotifs, highCreditNotifs, supplierDueNotifs) {
-        val list = lowStockNotifs + highCreditNotifs + supplierDueNotifs
-        if (list.isEmpty()) {
-            listOf(
-                HeaderNotification(
-                    id = "default_safe",
-                    textEn = "Your shop is running perfectly! Low stock, pending udhaar, and loans are all clear.",
-                    textUr = "آپ کی دکان کا نظام بہترین چل رہا ہے! کم اسٹاک، بقایا ادھار اور قرضے سب کلیئر ہیں۔",
-                    emoji = "✨",
-                    bgColor = DukanGreenLight,
-                    borderColor = GreenSuccessBorder,
-                    emojiColor = DukanGreenPrimary
-                )
-            )
+    val hasUnreadNotifs = activeUnreadNotifs.isNotEmpty()
+
+    val displayNotificationsList = remember(activeUnreadNotifs) {
+        if (activeUnreadNotifs.isEmpty()) {
+            listOf(NotificationHelper.defaultSafeNotification)
         } else {
-            list
+            activeUnreadNotifs
         }
     }
-    val hasUnreadNotifs = lowStockNotifs.isNotEmpty() || highCreditNotifs.isNotEmpty() || supplierDueNotifs.isNotEmpty()
 
     Surface(
         color = Slate50,
@@ -156,15 +125,13 @@ fun AppHeader(
                 ) {
                     IconButton(
                         onClick = onToggleMenu,
-                        modifier = Modifier
-                            .size(34.dp)
-                            .background(DukanGreenPrimary.copy(alpha = 0.1f), RoundedCornerShape(10.dp))
+                        modifier = Modifier.size(36.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.Menu,
                             contentDescription = if (isUrdu) "مینو" else "Menu",
-                            tint = DukanGreenPrimary,
-                            modifier = Modifier.size(20.dp)
+                            tint = DukanGreenHover,
+                            modifier = Modifier.size(24.dp)
                         )
                     }
 
@@ -220,7 +187,8 @@ fun AppHeader(
                         color = DukanGreenHover
                     )
 
-                    if (!profile.pinCode.isNullOrBlank()) {
+                    val canLock = !profile.securityPin.isNullOrBlank() || !profile.passwordCode.isNullOrBlank() || profile.biometricsEnabled
+                    if (canLock) {
                         IconButton(
                             onClick = onLockApp,
                             modifier = Modifier
@@ -397,7 +365,7 @@ fun AppHeader(
                     }
                 }
 
-                // Bell Icon with popover (Without box, prominent larger bell icon proportionate to 38.dp button height)
+                // Bell Icon with popover (Synced with React Navbar.tsx)
                 Box(
                     modifier = Modifier
                         .size(38.dp)
@@ -407,20 +375,21 @@ fun AppHeader(
                 ) {
                     Icon(
                         imageVector = if (hasUnreadNotifs) Icons.Outlined.NotificationsActive else Icons.Outlined.NotificationsNone,
-                        contentDescription = "Notifications",
-                        tint = if (hasUnreadNotifs) RedDanger else DukanGreenPrimary,
-                        modifier = Modifier.size(32.dp)
+                        contentDescription = if (isUrdu) "اطلاعات" else "Notifications",
+                        tint = if (hasUnreadNotifs) Color(0xFF0B132B) else DukanGreenPrimary,
+                        modifier = Modifier.size(30.dp)
                     )
                     if (hasUnreadNotifs) {
                         Box(
                             modifier = Modifier
-                                .size(9.dp)
-                                .background(RedDanger, CircleShape)
+                                .size(10.dp)
+                                .background(Color(0xFFEF4444), CircleShape)
+                                .border(1.5.dp, Color.White, CircleShape)
                                 .align(Alignment.TopEnd)
                         )
                     }
 
-                    // Notification Popover Dropdown
+                    // Notification Popover Dropdown (Synced with Navbar.tsx)
                     if (showNotifMsg) {
                         Popup(
                             alignment = Alignment.TopEnd,
@@ -428,51 +397,143 @@ fun AppHeader(
                         ) {
                             Card(
                                 modifier = Modifier
-                                    .width(280.dp)
+                                    .width(290.dp)
                                     .padding(top = 42.dp),
                                 shape = RoundedCornerShape(16.dp),
                                 colors = CardDefaults.cardColors(containerColor = Color.White),
-                                elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+                                border = androidx.compose.foundation.BorderStroke(1.dp, Slate200),
+                                elevation = CardDefaults.cardElevation(defaultElevation = 10.dp)
                             ) {
                                 Column(modifier = Modifier.padding(12.dp)) {
+                                    // Header row with Badge, View All, and Mark Read buttons
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
                                         horizontalArrangement = Arrangement.SpaceBetween,
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Text(
-                                            text = if (isUrdu) "اطلاعات" else "Notifications",
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 13.sp,
-                                            color = Slate900
-                                        )
-                                        TextButton(
-                                            onClick = {
-                                                onNavigateScreen(Screen.NOTIFICATIONS)
-                                                showNotifMsg = false
-                                            },
-                                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(4.dp)
                                         ) {
                                             Text(
-                                                text = if (isUrdu) "تمام دیکھیں" else "View All",
-                                                fontSize = 11.sp,
-                                                color = DukanGreenHover,
-                                                fontWeight = FontWeight.Bold
+                                                text = if (isUrdu) "اطلاعات" else "Notifications",
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 13.sp,
+                                                color = Slate900
                                             )
+                                            if (hasUnreadNotifs) {
+                                                Surface(
+                                                    color = Color(0xFFFEE2E2),
+                                                    shape = CircleShape
+                                                ) {
+                                                    Text(
+                                                        text = "${activeUnreadNotifs.size}",
+                                                        color = Color(0xFFB91C1C),
+                                                        fontSize = 10.sp,
+                                                        fontWeight = FontWeight.ExtraBold,
+                                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                    )
+                                                }
+                                            }
+                                        }
+
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                        ) {
+                                            // View All Button
+                                            Button(
+                                                onClick = {
+                                                    onNavigateScreen(Screen.NOTIFICATIONS)
+                                                    showNotifMsg = false
+                                                },
+                                                colors = ButtonDefaults.buttonColors(
+                                                    containerColor = Color(0xFFECFDF5),
+                                                    contentColor = Color(0xFF126A49)
+                                                ),
+                                                border = androidx.compose.foundation.BorderStroke(0.5.dp, Color(0xFFA7F3D0)),
+                                                shape = RoundedCornerShape(8.dp),
+                                                contentPadding = PaddingValues(horizontal = 7.dp, vertical = 2.dp),
+                                                modifier = Modifier.height(26.dp)
+                                            ) {
+                                                Text(
+                                                    text = if (isUrdu) "تمام دیکھیں" else "View All",
+                                                    fontSize = 10.5.sp,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            }
+
+                                            // Mark Read / All Clear
+                                            if (hasUnreadNotifs) {
+                                                Button(
+                                                    onClick = {
+                                                        onDismissAllNotifs?.invoke(activeUnreadNotifs.map { it.id })
+                                                    },
+                                                    colors = ButtonDefaults.buttonColors(
+                                                        containerColor = Color(0xFFFFE4E6),
+                                                        contentColor = Color(0xFFBE123C)
+                                                    ),
+                                                    shape = RoundedCornerShape(8.dp),
+                                                    contentPadding = PaddingValues(horizontal = 7.dp, vertical = 2.dp),
+                                                    modifier = Modifier.height(26.dp)
+                                                ) {
+                                                    Text(
+                                                        text = if (isUrdu) "پڑھ لیں" else "Mark Read",
+                                                        fontSize = 10.5.sp,
+                                                        fontWeight = FontWeight.Bold
+                                                    )
+                                                }
+                                            } else {
+                                                Surface(
+                                                    color = Color(0xFFD1FAE5),
+                                                    shape = RoundedCornerShape(8.dp)
+                                                ) {
+                                                    Text(
+                                                        text = if (isUrdu) "صاف" else "All Clear",
+                                                        color = Color(0xFF065F46),
+                                                        fontSize = 10.5.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                                                    )
+                                                }
+                                            }
                                         }
                                     }
 
-                                    Divider(color = Slate100, modifier = Modifier.padding(vertical = 4.dp))
+                                    Divider(color = Slate100, modifier = Modifier.padding(vertical = 6.dp))
 
+                                    // Notifications List
                                     Column(
                                         verticalArrangement = Arrangement.spacedBy(6.dp),
                                         modifier = Modifier.heightIn(max = 240.dp)
                                     ) {
-                                        allNotifs.forEach { notif ->
+                                        displayNotificationsList.forEach { notif ->
+                                            val notifBg = when (notif.type) {
+                                                NotificationType.LOW_STOCK -> if (notif.id == "default_safe_alert") Color(0xFFF0FDF4) else Color(0xFFFFFBEB)
+                                                NotificationType.HIGH_CREDIT -> Color(0xFFECFDF5)
+                                                NotificationType.SUPPLIER_DUE -> Color(0xFFFFF1F2)
+                                                NotificationType.LOAN_DUE -> Color(0xFFEEF2FF)
+                                            }
+
+                                            val notifBorder = when (notif.type) {
+                                                NotificationType.LOW_STOCK -> if (notif.id == "default_safe_alert") Color(0xFFBBF7D0) else Color(0xFFFDE68A)
+                                                NotificationType.HIGH_CREDIT -> Color(0xFFA7F3D0)
+                                                NotificationType.SUPPLIER_DUE -> Color(0xFFFECDD3)
+                                                NotificationType.LOAN_DUE -> Color(0xFFC7D2FE)
+                                            }
+
                                             Card(
-                                                colors = CardDefaults.cardColors(containerColor = notif.bgColor),
+                                                colors = CardDefaults.cardColors(containerColor = notifBg),
                                                 shape = RoundedCornerShape(10.dp),
-                                                border = androidx.compose.foundation.BorderStroke(1.dp, notif.borderColor)
+                                                border = androidx.compose.foundation.BorderStroke(1.dp, notifBorder),
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .clickable {
+                                                        if (notif.id != "default_safe_alert") {
+                                                            onNavigateScreen(notif.targetScreen)
+                                                            showNotifMsg = false
+                                                        }
+                                                    }
                                             ) {
                                                 Row(
                                                     modifier = Modifier.padding(8.dp),
@@ -483,8 +544,9 @@ fun AppHeader(
                                                     Text(
                                                         text = if (isUrdu) notif.textUr else notif.textEn,
                                                         fontSize = 11.sp,
-                                                        color = Slate700,
-                                                        lineHeight = 15.sp
+                                                        color = Slate800,
+                                                        lineHeight = 15.sp,
+                                                        fontWeight = FontWeight.Medium
                                                     )
                                                 }
                                             }

@@ -13,6 +13,131 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Gulzar&family=Noto+Nastaliq+Urdu:wght@400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <script>
+      // =========================================================================
+      // ANDROID WEBVIEW GEMINI NATIVE AUDIO STREAM & TTS BRIDGE INTERCEPTOR
+      // Prioritizes Gemini's native cloud audio stream over fallback local TTS
+      // =========================================================================
+      (function() {
+        var activeUtterance = null;
+        window.__isGeminiNativeVoiceActive = false;
+        window.__isAudioPlaying = false;
+        window.__currentAudioProvider = 'idle';
+
+        window.onAndroidVoiceActive = function(isGeminiNative, provider) {
+          window.__isGeminiNativeVoiceActive = !!isGeminiNative;
+          window.__currentAudioProvider = provider || (isGeminiNative ? 'gemini-native' : 'local-tts');
+          console.log('[AndroidBridgeTTS] Voice Active Signal: isGeminiNative=' + isGeminiNative + ', provider=' + window.__currentAudioProvider);
+        };
+
+        window.onAndroidAudioPlaybackStateChanged = function(isPlaying, isGeminiNative, provider) {
+          window.__isAudioPlaying = !!isPlaying;
+          window.__isGeminiNativeVoiceActive = !!isGeminiNative;
+          window.__currentAudioProvider = provider || (isPlaying ? (isGeminiNative ? 'gemini-native' : 'local-tts') : 'idle');
+          window.dispatchEvent(new CustomEvent('aiAudioPlaybackState', {
+            detail: {
+              isPlaying: window.__isAudioPlaying,
+              isGeminiNative: window.__isGeminiNativeVoiceActive,
+              provider: window.__currentAudioProvider
+            }
+          }));
+        };
+
+        window.onAndroidTtsStart = function(isGeminiNative) {
+          window.__isAudioPlaying = true;
+          window.__isGeminiNativeVoiceActive = (isGeminiNative !== undefined) ? !!isGeminiNative : true;
+          window.__currentAudioProvider = window.__isGeminiNativeVoiceActive ? 'gemini-native' : 'local-tts';
+          if (activeUtterance && typeof activeUtterance.onstart === 'function') {
+            try { activeUtterance.onstart(new Event('start')); } catch(e) {}
+          }
+          window.dispatchEvent(new CustomEvent('geminiVoiceStateChange', {
+            detail: { active: true, isGeminiNative: window.__isGeminiNativeVoiceActive, provider: window.__currentAudioProvider }
+          }));
+        };
+
+        window.onAndroidTtsDone = function() {
+          window.__isAudioPlaying = false;
+          window.__isGeminiNativeVoiceActive = false;
+          window.__currentAudioProvider = 'idle';
+          if (activeUtterance && typeof activeUtterance.onend === 'function') {
+            try { activeUtterance.onend(new Event('end')); } catch(e) {}
+          }
+          activeUtterance = null;
+          window.dispatchEvent(new CustomEvent('geminiVoiceStateChange', {
+            detail: { active: false, isGeminiNative: false, provider: 'idle' }
+          }));
+        };
+
+        window.onAndroidTtsError = function(err) {
+          console.warn('[AndroidBridgeTTS] Audio playback error:', err);
+          window.__isAudioPlaying = false;
+          window.__isGeminiNativeVoiceActive = false;
+          window.__currentAudioProvider = 'error';
+          if (activeUtterance && typeof activeUtterance.onerror === 'function') {
+            try { activeUtterance.onerror(new ErrorEvent('error', { error: new Error(err) })); } catch(e) {}
+          }
+          activeUtterance = null;
+          window.dispatchEvent(new CustomEvent('geminiVoiceStateChange', {
+            detail: { active: false, isGeminiNative: false, provider: 'error', error: err }
+          }));
+        };
+
+        // Global helper to play Gemini audio response payload
+        window.playGeminiAudio = function(payload) {
+          var bridge = window.AndroidSpeech || window.AndroidTts || window.AndroidTtsBridge;
+          if (bridge && typeof bridge.handleAudioResponse === 'function') {
+            var stringPayload = (typeof payload === 'object') ? JSON.stringify(payload) : String(payload);
+            bridge.handleAudioResponse(stringPayload);
+            return true;
+          }
+          return false;
+        };
+
+        // Intercept standard speechSynthesis if AndroidSpeech or AndroidTts bridge is present
+        // Prioritizes Gemini's native audio stream over any fallback local TTS engine.
+        if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+          var originalSpeak = window.speechSynthesis.speak.bind(window.speechSynthesis);
+          var originalCancel = window.speechSynthesis.cancel.bind(window.speechSynthesis);
+
+          window.speechSynthesis.speak = function(utterance) {
+            var bridge = window.AndroidSpeech || window.AndroidTts || window.AndroidTtsBridge;
+            if (bridge) {
+              activeUtterance = utterance;
+              var text = (utterance && utterance.text) ? utterance.text : '';
+              var lang = (utterance && utterance.lang) ? utterance.lang : '';
+              var isUrdu = lang.indexOf('ur') === 0 || /[\u0600-\u06FF]/.test(text);
+
+              // Prioritize Gemini native audio stream
+              if (typeof bridge.streamSpeech === 'function') {
+                console.log('[AndroidBridgeTTS] Prioritizing Gemini Native Audio Stream (isUrdu=' + isUrdu + ')');
+                bridge.streamSpeech(text, isUrdu);
+                return;
+              } else if (typeof bridge.speakText === 'function') {
+                console.log('[AndroidBridgeTTS] Invoking Gemini Audio Stream speakText (isUrdu=' + isUrdu + ')');
+                bridge.speakText(text, isUrdu);
+                return;
+              }
+            }
+            if (originalSpeak) {
+              originalSpeak(utterance);
+            }
+          };
+
+          window.speechSynthesis.cancel = function() {
+            var bridge = window.AndroidSpeech || window.AndroidTts || window.AndroidTtsBridge;
+            if (bridge && typeof bridge.stopSpeech === 'function') {
+              bridge.stopSpeech();
+            } else if (bridge && typeof bridge.stop === 'function') {
+              bridge.stop();
+            }
+            if (originalCancel) {
+              originalCancel();
+            }
+            activeUtterance = null;
+          };
+        }
+      })();
+    </script>
     <script type="module" crossorigin src="./assets/index-6nndGJl-.js"></script>
     <link rel="stylesheet" crossorigin href="./assets/index-BSf9So3a.css">
   </head>

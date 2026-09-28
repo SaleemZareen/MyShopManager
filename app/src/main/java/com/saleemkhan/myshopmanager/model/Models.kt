@@ -207,8 +207,10 @@ data class TaxRecord(
     val adjustableTax: Double = 0.0,
     val advanceTax: Double = 0.0,
     val psidPayments: Double = 0.0,
+    val psidChallanNumber: String = "",
     val bankWithholding: Double = 0.0,
     val utilityWithholding: Double = 0.0,
+    val mobileWithholding: Double = 0.0,
     val vehicleTax: Double = 0.0,
     val propertyTax: Double = 0.0,
     val otherTaxCertificates: Double = 0.0,
@@ -260,4 +262,21 @@ data class AppState(
     val taxRecord: TaxRecord = TaxRecord(),
     val activeShopId: String = "shop_01",
     val otherShops: List<ShopInfo> = listOf(ShopInfo("shop_01", "My Shop"))
+)
+
+enum class NotificationType {
+    LOW_STOCK,
+    HIGH_CREDIT,
+    SUPPLIER_DUE,
+    LOAN_DUE
+}
+
+data class AppNotificationItem(
+    val id: String,
+    val textEn: String,
+    val textUr: String,
+    val emoji: String,
+    val type: NotificationType,
+    val targetScreen: Screen,
+    val targetId: String? = null
 )

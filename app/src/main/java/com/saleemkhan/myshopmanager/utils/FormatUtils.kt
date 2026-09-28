@@ -1,6 +1,8 @@
 package com.saleemkhan.myshopmanager.utils
 
 import com.saleemkhan.myshopmanager.model.*
+import android.content.Context
+import android.app.DatePickerDialog
 import java.text.DecimalFormat
 import java.text.DecimalFormatSymbols
 import java.text.SimpleDateFormat
@@ -77,8 +79,20 @@ object FormatUtils {
     private val currencyFormat = DecimalFormat("#,##0", DecimalFormatSymbols(Locale.US))
     private val decimalCurrencyFormat = DecimalFormat("#,##0.##", DecimalFormatSymbols(Locale.US))
 
+    fun sanitizePakistaniCurrency(text: String): String {
+        return text
+            .replace("₹", "Rs. ")
+            .replace("INR", "Rs.", ignoreCase = true)
+            .replace("inr", "Rs.", ignoreCase = true)
+    }
+
     fun formatCurrency(amount: Double, symbol: String = "Rs."): String {
-        return "$symbol ${currencyFormat.format(amount)}"
+        val cleanSymbol = if (symbol.contains("₹") || symbol.equals("INR", ignoreCase = true) || symbol.isBlank()) "Rs." else symbol
+        return "$cleanSymbol ${currencyFormat.format(amount)}"
+    }
+
+    fun formatMoney(amount: Double, symbol: String = "Rs."): String {
+        return formatCurrency(amount, symbol)
     }
 
     fun formatNumber(amount: Double): String {
@@ -106,5 +120,64 @@ object FormatUtils {
         } catch (e: Exception) {
             dateStr
         }
+    }
+
+    fun formatDate(dateStr: String?): String {
+        if (dateStr.isNullOrBlank()) return "Today"
+        return try {
+            val parser = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+            val d = if (dateStr.length >= 10) parser.parse(dateStr.substring(0, 10)) else Date()
+            val outSdf = SimpleDateFormat("dd-MMM-yyyy", Locale.US)
+            outSdf.format(d ?: Date())
+        } catch (e: Exception) {
+            dateStr.take(10)
+        }
+    }
+
+    fun formatFullDateTime(dateStr: String?): String {
+        if (dateStr.isNullOrBlank()) return ""
+        return try {
+            val parser = SimpleDateFormat("yyyy-MM-dd'T'HH:mm", Locale.US)
+            val d = if (dateStr.contains("T")) parser.parse(dateStr.take(16)) else null
+            if (d != null) {
+                val outSdf = SimpleDateFormat("dd-MMM-yy hh:mm a", Locale.US)
+                outSdf.format(d)
+            } else {
+                formatDate(dateStr)
+            }
+        } catch (e: Exception) {
+            formatDate(dateStr)
+        }
+    }
+
+    fun showDatePickerDialog(
+        context: Context,
+        currentDateStr: String,
+        onDateSelected: (String) -> Unit
+    ) {
+        val cal = Calendar.getInstance()
+        if (currentDateStr.isNotBlank()) {
+            try {
+                val parts = currentDateStr.trim().split("-")
+                if (parts.size >= 3) {
+                    val year = parts[0].toIntOrNull() ?: cal.get(Calendar.YEAR)
+                    val month = (parts[1].toIntOrNull() ?: (cal.get(Calendar.MONTH) + 1)) - 1
+                    val day = parts[2].take(2).toIntOrNull() ?: cal.get(Calendar.DAY_OF_MONTH)
+                    cal.set(year, month, day)
+                }
+            } catch (_: Exception) {}
+        }
+
+        val dialog = DatePickerDialog(
+            context,
+            { _, year, month, dayOfMonth ->
+                val formatted = String.format(Locale.US, "%04d-%02d-%02d", year, month + 1, dayOfMonth)
+                onDateSelected(formatted)
+            },
+            cal.get(Calendar.YEAR),
+            cal.get(Calendar.MONTH),
+            cal.get(Calendar.DAY_OF_MONTH)
+        )
+        dialog.show()
     }
 }
