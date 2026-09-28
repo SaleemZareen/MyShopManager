@@ -605,7 +605,14 @@ fun MyShopManagerApp() {
                                 )
                             }
                             Screen.BACKUP_SYNC -> {
-                                BackupSyncScreen(state = appState, isUrdu = isUrdu)
+                                BackupSyncScreen(
+                                    state = appState,
+                                    isUrdu = isUrdu,
+                                    onBack = { handleBack() },
+                                    onRestoreState = { restoredState ->
+                                        repository.saveState(restoredState)
+                                    }
+                                )
                             }
                             Screen.SETTINGS -> {
                                 SettingsScreen(

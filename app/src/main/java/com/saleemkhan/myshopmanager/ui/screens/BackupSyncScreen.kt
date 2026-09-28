@@ -2,21 +2,23 @@ package com.saleemkhan.myshopmanager.ui.screens
 
 import android.accounts.AccountManager
 import android.app.Activity
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
-import java.util.Locale
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -31,24 +33,56 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
-import com.google.android.gms.common.api.ApiException
 import com.saleemkhan.myshopmanager.data.AiQuotaManager
+import com.saleemkhan.myshopmanager.data.AppStateRepository
+import com.saleemkhan.myshopmanager.data.AutoSyncSettings
 import com.saleemkhan.myshopmanager.data.GoogleAuthManager
+import com.saleemkhan.myshopmanager.data.backup.*
 import com.saleemkhan.myshopmanager.model.AppState
 import com.saleemkhan.myshopmanager.ui.theme.*
+import kotlinx.coroutines.launch
+import java.util.Locale
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BackupSyncScreen(
     state: AppState,
-    isUrdu: Boolean
+    isUrdu: Boolean,
+    onBack: (() -> Unit)? = null,
+    onRestoreState: ((AppState) -> Unit)? = null
 ) {
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
     val authManager = remember { GoogleAuthManager.getInstance(context) }
     val quotaManager = remember { AiQuotaManager.getInstance(context) }
+    val backupManager = remember { BackupManager.getInstance() }
+    val repository = remember { AppStateRepository.getInstance(context) }
 
     var profile by remember { mutableStateOf(authManager.getProfile()) }
+    var autoSyncSettings by remember { mutableStateOf(authManager.getAutoSyncSettings()) }
     var isSigningIn by remember { mutableStateOf(false) }
 
+    // Backup & Restore states
+    var isExporting by remember { mutableStateOf(false) }
+    var isBackingUpDrive by remember { mutableStateOf(false) }
+    var isLoadingDriveList by remember { mutableStateOf(false) }
+    var isRestoring by remember { mutableStateOf(false) }
+
+    var localBackupsList by remember { mutableStateOf<List<BackupFileInfo>>(emptyList()) }
+    var driveBackupsList by remember { mutableStateOf<List<DriveBackupInfo>>(emptyList()) }
+    var showLocalBackupsList by remember { mutableStateOf(false) }
+    var showDriveBackupsList by remember { mutableStateOf(false) }
+
+    // Restore dialog state
+    var pendingRestoreState by remember { mutableStateOf<AppState?>(null) }
+    var pendingValidation by remember { mutableStateOf<ValidationResult?>(null) }
+    var pendingRestoreSourceTitle by remember { mutableStateOf("") }
+    var restoreMode by remember { mutableStateOf(RestoreMode.REPLACE_ALL) }
+    var createSafetyBackupBeforeRestore by remember { mutableStateOf(true) }
+    var showRestoreDialog by remember { mutableStateOf(false) }
+    var validationErrorMessage by remember { mutableStateOf<String?>(null) }
+
+    // Google Sign-In Client
     val gso = remember {
         GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
             .requestEmail()
@@ -57,30 +91,46 @@ fun BackupSyncScreen(
     }
     val googleSignInClient = remember { GoogleSignIn.getClient(context, gso) }
 
+    fun refreshLists() {
+        coroutineScope.launch {
+            localBackupsList = backupManager.listLocalBackups(context)
+            if (profile.isLoggedIn) {
+                isLoadingDriveList = true
+                val driveRes = backupManager.listGoogleDriveBackups(context)
+                if (driveRes.isSuccess) {
+                    driveBackupsList = driveRes.getOrDefault(emptyList())
+                }
+                isLoadingDriveList = false
+            }
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        refreshLists()
+    }
+
     val googleSignInLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
         isSigningIn = false
-
         if (result.resultCode == Activity.RESULT_OK && result.data != null) {
-            // 1. Android Native Account Picker result (AccountManager)
             val chosenEmail = result.data?.getStringExtra(AccountManager.KEY_ACCOUNT_NAME)
             if (!chosenEmail.isNullOrBlank()) {
                 val rawName = chosenEmail.substringBefore("@").replace(".", " ")
                 val formattedName = rawName.split(" ").joinToString(" ") { word ->
                     word.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }
                 }
-                authManager.saveLogin(formattedName, chosenEmail, null)
+                authManager.saveLogin(formattedName, chosenEmail, null, "google_${chosenEmail.hashCode()}")
                 profile = authManager.getProfile()
                 Toast.makeText(
                     context,
                     if (isUrdu) "گوگل اکاؤنٹ ($chosenEmail) کامیابی سے سائن ان ہو گیا!" else "Google Account ($chosenEmail) signed in successfully!",
                     Toast.LENGTH_SHORT
                 ).show()
+                refreshLists()
                 return@rememberLauncherForActivityResult
             }
 
-            // 2. Try Google Play Services account result
             try {
                 val task = GoogleSignIn.getSignedInAccountFromIntent(result.data)
                 val account = if (task.isSuccessful) task.result else null
@@ -88,75 +138,153 @@ fun BackupSyncScreen(
                 if (!email.isNullOrBlank()) {
                     val name = account.displayName?.ifBlank { null } ?: email.substringBefore("@")
                     val photo = account.photoUrl?.toString()
-                    authManager.saveLogin(name, email, photo)
+                    val accountId = account.id ?: "google_${email.hashCode()}"
+                    authManager.saveLogin(name, email, photo, accountId)
                     profile = authManager.getProfile()
                     Toast.makeText(
                         context,
                         if (isUrdu) "گوگل اکاؤنٹ ($email) کامیابی سے سائن ان ہو گیا!" else "Google Account ($email) signed in successfully!",
                         Toast.LENGTH_SHORT
                     ).show()
+                    refreshLists()
                     return@rememberLauncherForActivityResult
                 }
             } catch (_: Exception) {}
-
-            // 3. Fallback: inspect any String extra in result.data containing email address
-            result.data?.extras?.let { bundle ->
-                for (key in bundle.keySet()) {
-                    val candidate = bundle.getString(key)
-                    if (!candidate.isNullOrBlank() && candidate.contains("@") && candidate.contains(".")) {
-                        val name = candidate.substringBefore("@")
-                        authManager.saveLogin(name, candidate, null)
-                        profile = authManager.getProfile()
-                        Toast.makeText(
-                            context,
-                            if (isUrdu) "گوگل اکاؤنٹ ($candidate) کامیابی سے سائن ان ہو گیا!" else "Google Account ($candidate) signed in successfully!",
-                            Toast.LENGTH_SHORT
-                        ).show()
-                        return@rememberLauncherForActivityResult
-                    }
-                }
-            }
         }
     }
 
     val launchNativeGoogleAccountPicker = {
         isSigningIn = true
         try {
-            // First try Android's standard account chooser - directly lists all Google accounts logged in on device
             val intent = AccountManager.newChooseAccountIntent(
                 null, null, arrayOf("com.google"), null, null, null, null
             )
             googleSignInLauncher.launch(intent)
         } catch (_: Exception) {
             try {
-                // Fallback to Google Play Services sign-in intent
                 val signInIntent = googleSignInClient.signInIntent
                 googleSignInLauncher.launch(signInIntent)
             } catch (e: Exception) {
                 isSigningIn = false
                 Toast.makeText(
                     context,
-                    if (isUrdu) "گوگل سائن ان ونڈو کھولنے میں مسئلہ: ${e.message}" else "Sign-in error: ${e.message}",
+                    if (isUrdu) "گوگل سائن ان میں مسئلہ: ${e.message}" else "Sign-in error: ${e.message}",
                     Toast.LENGTH_LONG
                 ).show()
             }
         }
     }
 
+    // SAF Create Document Launcher (Export to storage)
+    val exportFileLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/json")
+    ) { uri: Uri? ->
+        if (uri != null) {
+            coroutineScope.launch {
+                isExporting = true
+                val result = backupManager.exportToStorage(context, uri, state)
+                isExporting = false
+                if (result.isSuccess) {
+                    profile = authManager.getProfile()
+                    Toast.makeText(
+                        context,
+                        if (isUrdu) "بیک اپ فائل کامیابی سے منتخب کردہ فولڈر میں محفوظ ہو گئی!" else "Backup saved to chosen folder successfully!",
+                        Toast.LENGTH_LONG
+                    ).show()
+                } else {
+                    Toast.makeText(
+                        context,
+                        if (isUrdu) "فائل سیو کرنے میں خرابی: ${result.exceptionOrNull()?.message}" else "Export failed: ${result.exceptionOrNull()?.message}",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
+        }
+    }
+
+    // SAF Open Document Launcher (Restore from user-selected file)
+    val importFileLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            coroutineScope.launch {
+                isRestoring = true
+                val readResult = backupManager.readUriContent(context, uri)
+                isRestoring = false
+                if (readResult.isSuccess) {
+                    val json = readResult.getOrNull() ?: ""
+                    val validation = backupManager.validateJson(json)
+                    if (validation.isValid && validation.payloadState != null) {
+                        pendingRestoreState = validation.payloadState
+                        pendingValidation = validation
+                        pendingRestoreSourceTitle = if (isUrdu) "منتخب کردہ لوکل فائل" else "Selected Local File"
+                        showRestoreDialog = true
+                    } else {
+                        validationErrorMessage = validation.errorReason ?: "Invalid file structure"
+                    }
+                } else {
+                    Toast.makeText(
+                        context,
+                        if (isUrdu) "فائل پڑھنے میں ناکامی ہوئی" else "Failed to read backup file",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+            }
+        }
+    }
+
+    // Gemini AI key states
     var customKeyInput by remember { mutableStateOf(quotaManager.getCustomApiKey()) }
     var hasCustomKey by remember { mutableStateOf(quotaManager.hasCustomKey()) }
     var dailyRemaining by remember { mutableStateOf(quotaManager.getDailyRemaining()) }
-
-    var isBackingUp by remember { mutableStateOf(false) }
 
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
             .background(Slate50)
-            .padding(12.dp),
+            .padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
-        contentPadding = PaddingValues(bottom = 32.dp)
+        contentPadding = PaddingValues(bottom = 36.dp)
     ) {
+        // Top Header
+        item {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    if (onBack != null) {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Slate800)
+                        }
+                    }
+                    Column {
+                        Text(
+                            text = if (isUrdu) "بیک اپ، کلاؤڈ سنک اور ڈیٹا مینجمنٹ" else "Backup, Cloud Sync & Data",
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Slate900
+                        )
+                        Text(
+                            text = if (isUrdu) "گوگل اکاؤنٹ، ڈرائیو کلاؤڈ اور فون اسٹوریج کا مکمل نظام" else "Google Account, Drive Cloud & Local Storage System",
+                            fontSize = 12.sp,
+                            color = Slate600
+                        )
+                    }
+                }
+
+                IconButton(onClick = { refreshLists() }) {
+                    Icon(Icons.Default.Refresh, contentDescription = "Refresh", tint = DukanGreenPrimary)
+                }
+            }
+        }
+
         // 1. Google Account & Live Profile Card
         item {
             Card(
@@ -169,7 +297,6 @@ fun BackupSyncScreen(
                     modifier = Modifier.padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    // Header Bar
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -202,7 +329,7 @@ fun BackupSyncScreen(
                             }
 
                             Text(
-                                text = if (isUrdu) "گوگل اکاؤنٹ اور کلاؤڈ سنک" else "Google Account & Cloud Sync",
+                                text = if (isUrdu) "گوگل اکاؤنٹ (Google Account)" else "Google Account",
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 15.sp,
                                 color = Slate900
@@ -216,12 +343,12 @@ fun BackupSyncScreen(
                         ) {
                             Text(
                                 text = if (profile.isLoggedIn) {
-                                    if (isUrdu) "منسلک ہے ✓" else "Connected ✓"
+                                    if (isUrdu) "لاگ ان ہے ✓" else "Signed In ✓"
                                 } else {
                                     if (isUrdu) "غیر منسلک" else "Not Linked"
                                 },
                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                                fontSize = 10.5.sp,
+                                fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = if (profile.isLoggedIn) Color(0xFF065F46) else Color(0xFF64748B)
                             )
@@ -229,7 +356,6 @@ fun BackupSyncScreen(
                     }
 
                     if (profile.isLoggedIn) {
-                        // Connected Profile Display Card with Profile Photo
                         Surface(
                             shape = RoundedCornerShape(12.dp),
                             color = Color(0xFFF8FAFC),
@@ -243,7 +369,6 @@ fun BackupSyncScreen(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
-                                // Profile Avatar / Photo
                                 Box(
                                     modifier = Modifier
                                         .size(48.dp)
@@ -287,7 +412,7 @@ fun BackupSyncScreen(
                                             modifier = Modifier.size(13.dp)
                                         )
                                         Text(
-                                            text = if (isUrdu) "گوگل ڈرائیو اور جیمنائی سنک فعال ہے" else "Drive & Gemini Sync Active",
+                                            text = if (isUrdu) "گوگل ڈرائیو بیک اپ فعال ہے" else "Drive Cloud Backup Ready",
                                             fontSize = 10.5.sp,
                                             color = Color(0xFF059669),
                                             fontWeight = FontWeight.SemiBold
@@ -297,7 +422,6 @@ fun BackupSyncScreen(
                             }
                         }
 
-                        // Connected Actions
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -324,9 +448,10 @@ fun BackupSyncScreen(
                                     } catch (_: Exception) {}
                                     authManager.signOut()
                                     profile = authManager.getProfile()
+                                    driveBackupsList = emptyList()
                                     Toast.makeText(
                                         context,
-                                        if (isUrdu) "اکاؤنٹ لاگ آؤٹ کر دیا گیا" else "Account signed out",
+                                        if (isUrdu) "گوگل اکاؤنٹ سائن آؤٹ کر دیا گیا" else "Google Account signed out",
                                         Toast.LENGTH_SHORT
                                     ).show()
                                 },
@@ -343,12 +468,11 @@ fun BackupSyncScreen(
                             }
                         }
                     } else {
-                        // Unlinked Instructions & Interactive Sign-In Button
                         Text(
                             text = if (isUrdu) {
-                                "اپنے موبائل میں موجود کسی بھی گوگل اکاؤنٹ سے لاگ ان کریں تاکہ دکان کا کلاؤڈ بیک اپ محفوظ رہے اور جیمنائی مشیر سنک رہے۔"
+                                "اپنے فون کے گوگل اکاؤنٹ سے سائن ان کریں تاکہ آپ کی دکان کا کھاتہ، اسٹاک اور بل گوگل ڈرائیو پر محفوظ رہیں اور فون تبدیل کرنے کی صورت میں 1 منٹ میں بحال ہو سکیں۔"
                             } else {
-                                "Sign in with your Google account on this device to backup your shop data and sync Gemini AI Advisor."
+                                "Sign in with your Google Account to automatically protect your shop data on Google Drive with 1-click cloud restore."
                             },
                             fontSize = 12.sp,
                             color = Slate600,
@@ -365,7 +489,7 @@ fun BackupSyncScreen(
                             if (isSigningIn) {
                                 CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Color.White, strokeWidth = 2.dp)
                                 Spacer(modifier = Modifier.width(8.dp))
-                                Text(text = if (isUrdu) "اکاؤنٹ لوڈ ہو رہا ہے..." else "Opening Google Accounts...", fontSize = 13.sp)
+                                Text(text = if (isUrdu) "اکاؤنٹ لوڈ ہو رہا ہے..." else "Opening Accounts...", fontSize = 13.sp)
                             } else {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
@@ -381,7 +505,7 @@ fun BackupSyncScreen(
                                         Text("G", fontWeight = FontWeight.Black, fontSize = 12.sp, color = Color(0xFF4285F4))
                                     }
                                     Text(
-                                        text = if (isUrdu) "گوگل سے سائن ان کریں" else "Sign In with Google",
+                                        text = if (isUrdu) "گوگل سے سائن ان کریں (Sign In)" else "Sign In with Google",
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 13.sp
                                     )
@@ -393,7 +517,637 @@ fun BackupSyncScreen(
             }
         }
 
-        // 2. Google Gemini AI Assistant & Official AI Studio Free Tier Card
+        // 2. Local Backup & Storage Card (SAF Document Picker + Device Snapshots)
+        item {
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = Color.White),
+                border = BorderStroke(1.dp, Slate200),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Icon(Icons.Default.SdStorage, contentDescription = null, tint = Color(0xFF0284C7), modifier = Modifier.size(22.dp))
+                            Text(
+                                text = if (isUrdu) "لوکل فون اسٹوریج بیک اپ و ری اسٹور" else "Local Storage Backup & Restore",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 15.sp,
+                                color = Slate900
+                            )
+                        }
+
+                        if (profile.lastLocalBackupDate != null) {
+                            Text(
+                                text = profile.lastLocalBackupDate ?: "",
+                                fontSize = 10.sp,
+                                color = Slate500
+                            )
+                        }
+                    }
+
+                    Text(
+                        text = if (isUrdu) {
+                            "اپنے فون کے کسی بھی فولڈر (Downloads, Documents, SD Card) میں محفوظ کریں یا پرانی بیک اپ فائل منتخب کر کے کھاتہ دوبارہ حاصل کریں۔"
+                        } else {
+                            "Export your entire shop data to any folder or SD card via Android File Picker, or select an existing backup file to restore."
+                        },
+                        fontSize = 11.5.sp,
+                        color = Slate600
+                    )
+
+                    // Action buttons: Export and Restore
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = {
+                                val defaultName = backupManager.localProvider.getDefaultExportFileName()
+                                exportFileLauncher.launch(defaultName)
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7)),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.weight(1f).height(44.dp),
+                            enabled = !isExporting
+                        ) {
+                            if (isExporting) {
+                                CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.White, strokeWidth = 2.dp)
+                            } else {
+                                Icon(Icons.Default.FileDownload, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(text = if (isUrdu) "ایکسپورٹ بیک اپ" else "Export File", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            }
+                        }
+
+                        Button(
+                            onClick = {
+                                importFileLauncher.launch(arrayOf("application/json", "*/*"))
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0D9488)),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.weight(1f).height(44.dp),
+                            enabled = !isRestoring
+                        ) {
+                            if (isRestoring) {
+                                CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.White, strokeWidth = 2.dp)
+                            } else {
+                                Icon(Icons.Default.FileUpload, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(text = if (isUrdu) "ری اسٹور فائل" else "Restore File", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            }
+                        }
+                    }
+
+                    // Quick Device Snapshot
+                    OutlinedButton(
+                        onClick = {
+                            coroutineScope.launch {
+                                val quickRes = backupManager.createQuickBackup(context, state, isSafety = false)
+                                if (quickRes.isSuccess) {
+                                    authManager.recordLocalBackup()
+                                    profile = authManager.getProfile()
+                                    refreshLists()
+                                    Toast.makeText(
+                                        context,
+                                        if (isUrdu) "فوری اسنیپ شاٹ فون اسٹوریج میں بن گیا!" else "Quick device snapshot saved!",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                } else {
+                                    Toast.makeText(
+                                        context,
+                                        "Error: ${quickRes.exceptionOrNull()?.message}",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                }
+                            }
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth().height(42.dp)
+                    ) {
+                        Icon(Icons.Default.BookmarkBorder, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = if (isUrdu) "فوری محفوظ اسنیپ شاٹ بنائیں (Quick Snapshot)" else "Take Instant Safety Snapshot",
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+
+                    // Expandable list of local saved snapshots
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { showLocalBackupsList = !showLocalBackupsList }
+                            .padding(vertical = 6.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = if (isUrdu) "محفوظ شدہ لوکل اسنیپ شاٹس (${localBackupsList.size})" else "Device Saved Snapshots (${localBackupsList.size})",
+                            fontSize = 12.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Slate800
+                        )
+                        Icon(
+                            imageVector = if (showLocalBackupsList) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                            contentDescription = null,
+                            tint = Slate600
+                        )
+                    }
+
+                    AnimatedVisibility(visible = showLocalBackupsList) {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            if (localBackupsList.isEmpty()) {
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = Color(0xFFF8FAFC),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text(
+                                        text = if (isUrdu) "فی الوقت کوئی لوکل اسنیپ شاٹ موجود نہیں۔" else "No device snapshots found yet.",
+                                        fontSize = 11.sp,
+                                        color = Slate500,
+                                        modifier = Modifier.padding(12.dp)
+                                    )
+                                }
+                            } else {
+                                localBackupsList.forEach { fileInfo ->
+                                    Surface(
+                                        shape = RoundedCornerShape(10.dp),
+                                        color = if (fileInfo.isSafetyBackup) Color(0xFFFFFBEB) else Color(0xFFF8FAFC),
+                                        border = BorderStroke(1.dp, if (fileInfo.isSafetyBackup) Color(0xFFFDE68A) else Color(0xFFE2E8F0)),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(10.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                                    if (fileInfo.isSafetyBackup) {
+                                                        Surface(
+                                                            shape = RoundedCornerShape(4.dp),
+                                                            color = Color(0xFFFEF3C7)
+                                                        ) {
+                                                            Text(
+                                                                text = if (isUrdu) "حفاظتی" else "Safety",
+                                                                fontSize = 9.sp,
+                                                                color = Color(0xFFB45309),
+                                                                fontWeight = FontWeight.Bold,
+                                                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                                            )
+                                                        }
+                                                    }
+                                                    Text(
+                                                        text = fileInfo.fileName,
+                                                        fontSize = 11.sp,
+                                                        fontWeight = FontWeight.SemiBold,
+                                                        color = Slate900,
+                                                        maxLines = 1
+                                                    )
+                                                }
+                                                Text(
+                                                    text = "${fileInfo.formattedDate} • ${fileInfo.formattedSize}" +
+                                                            (if (fileInfo.metadata != null) " • ${fileInfo.metadata.customerCount} Khata, ${fileInfo.metadata.inventoryCount} Stock" else ""),
+                                                    fontSize = 10.sp,
+                                                    color = Slate500
+                                                )
+                                            }
+
+                                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                                IconButton(
+                                                    onClick = {
+                                                        coroutineScope.launch {
+                                                            try {
+                                                                val file = java.io.File(fileInfo.filePath)
+                                                                val content = file.readText(Charsets.UTF_8)
+                                                                val validation = backupManager.validateJson(content)
+                                                                if (validation.isValid && validation.payloadState != null) {
+                                                                    pendingRestoreState = validation.payloadState
+                                                                    pendingValidation = validation
+                                                                    pendingRestoreSourceTitle = fileInfo.fileName
+                                                                    showRestoreDialog = true
+                                                                } else {
+                                                                    validationErrorMessage = validation.errorReason ?: "Corrupt snapshot"
+                                                                }
+                                                            } catch (e: Exception) {
+                                                                Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_SHORT).show()
+                                                            }
+                                                        }
+                                                    },
+                                                    modifier = Modifier.size(32.dp)
+                                                ) {
+                                                    Icon(Icons.Default.Restore, contentDescription = "Restore", tint = Color(0xFF0D9488), modifier = Modifier.size(18.dp))
+                                                }
+
+                                                IconButton(
+                                                    onClick = {
+                                                        coroutineScope.launch {
+                                                            backupManager.deleteLocalBackup(fileInfo.filePath)
+                                                            refreshLists()
+                                                        }
+                                                    },
+                                                    modifier = Modifier.size(32.dp)
+                                                ) {
+                                                    Icon(Icons.Default.DeleteOutline, contentDescription = "Delete", tint = Color(0xFFDC2626), modifier = Modifier.size(18.dp))
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 3. Google Drive Cloud Backup Card
+        item {
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = Color.White),
+                border = BorderStroke(1.dp, Slate200),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Icon(Icons.Default.CloudSync, contentDescription = null, tint = Color(0xFF2563EB), modifier = Modifier.size(22.dp))
+                            Text(
+                                text = if (isUrdu) "گوگل ڈرائیو کلاؤڈ بیک اپ" else "Google Drive Cloud Backup",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 15.sp,
+                                color = Slate900
+                            )
+                        }
+
+                        if (profile.lastBackupDate != null) {
+                            Text(
+                                text = profile.lastBackupDate ?: "",
+                                fontSize = 10.sp,
+                                color = Slate500
+                            )
+                        }
+                    }
+
+                    if (!profile.isLoggedIn) {
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = Color(0xFFFFFBEB),
+                            border = BorderStroke(1.dp, Color(0xFFFDE68A)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(Icons.Default.Info, contentDescription = null, tint = Color(0xFFD97706), modifier = Modifier.size(18.dp))
+                                Text(
+                                    text = if (isUrdu) "گوگل ڈرائیو بیک اپ استعمال کرنے کے لیے اوپر دیے گئے بٹن سے گوگل اکاؤنٹ لاگ ان کریں۔" else "Please sign in with your Google account above to use Google Drive backup.",
+                                    fontSize = 11.5.sp,
+                                    color = Color(0xFF92400E)
+                                )
+                            }
+                        }
+                    } else {
+                        Button(
+                            onClick = {
+                                coroutineScope.launch {
+                                    isBackingUpDrive = true
+                                    val result = backupManager.backupToGoogleDrive(context, state)
+                                    isBackingUpDrive = false
+                                    if (result.isSuccess) {
+                                        profile = authManager.getProfile()
+                                        refreshLists()
+                                        Toast.makeText(
+                                            context,
+                                            if (isUrdu) "گوگل ڈرائیو پر بیک اپ کامیابی سے محفوظ ہو گیا!" else "Backup saved to Google Drive successfully!",
+                                            Toast.LENGTH_LONG
+                                        ).show()
+                                    } else {
+                                        Toast.makeText(
+                                            context,
+                                            if (isUrdu) "ڈرائیو بیک اپ میں مسئلہ: ${result.exceptionOrNull()?.message}" else "Drive backup error: ${result.exceptionOrNull()?.message}",
+                                            Toast.LENGTH_LONG
+                                        ).show()
+                                    }
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = DukanGreenPrimary),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth().height(46.dp),
+                            enabled = !isBackingUpDrive
+                        ) {
+                            if (isBackingUpDrive) {
+                                CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Color.White, strokeWidth = 2.dp)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(text = if (isUrdu) "گوگل ڈرائیو پر اپلوڈ ہو رہا ہے..." else "Uploading to Google Drive...", fontSize = 13.sp)
+                            } else {
+                                Icon(Icons.Default.CloudUpload, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = if (isUrdu) "ابھی گوگل ڈرائیو پر بیک اپ لیں (Upload Now)" else "Backup to Google Drive Now",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp
+                                )
+                            }
+                        }
+
+                        // Drive Backups Explorer
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { showDriveBackupsList = !showDriveBackupsList }
+                                .padding(vertical = 6.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(
+                                    text = if (isUrdu) "ڈرائیو پر موجود بیک اپس (${driveBackupsList.size})" else "Google Drive Backups (${driveBackupsList.size})",
+                                    fontSize = 12.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Slate800
+                                )
+                                if (isLoadingDriveList) {
+                                    CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+                                }
+                            }
+                            Icon(
+                                imageVector = if (showDriveBackupsList) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                contentDescription = null,
+                                tint = Slate600
+                            )
+                        }
+
+                        AnimatedVisibility(visible = showDriveBackupsList) {
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                if (driveBackupsList.isEmpty()) {
+                                    Surface(
+                                        shape = RoundedCornerShape(8.dp),
+                                        color = Color(0xFFF8FAFC),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text(
+                                            text = if (isUrdu) "گوگل ڈرائیو پر فی الوقت کوئی بیک اپ فائل نہیں ہے۔" else "No backups found in Google Drive yet.",
+                                            fontSize = 11.sp,
+                                            color = Slate500,
+                                            modifier = Modifier.padding(12.dp)
+                                        )
+                                    }
+                                } else {
+                                    driveBackupsList.forEach { driveItem ->
+                                        Surface(
+                                            shape = RoundedCornerShape(10.dp),
+                                            color = Color(0xFFF0FDF4),
+                                            border = BorderStroke(1.dp, Color(0xFFBBF7D0)),
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.padding(10.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.SpaceBetween
+                                            ) {
+                                                Column(modifier = Modifier.weight(1f)) {
+                                                    Text(
+                                                        text = driveItem.name,
+                                                        fontSize = 11.sp,
+                                                        fontWeight = FontWeight.SemiBold,
+                                                        color = Slate900,
+                                                        maxLines = 1
+                                                    )
+                                                    Text(
+                                                        text = "${driveItem.formattedDate} • ${driveItem.formattedSize}",
+                                                        fontSize = 10.sp,
+                                                        color = Slate500
+                                                    )
+                                                }
+
+                                                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                                    IconButton(
+                                                        onClick = {
+                                                            coroutineScope.launch {
+                                                                isRestoring = true
+                                                                val downloadRes = backupManager.downloadDriveBackup(context, driveItem.fileId)
+                                                                isRestoring = false
+                                                                if (downloadRes.isSuccess) {
+                                                                    val content = downloadRes.getOrNull() ?: ""
+                                                                    val validation = backupManager.validateJson(content)
+                                                                    if (validation.isValid && validation.payloadState != null) {
+                                                                        pendingRestoreState = validation.payloadState
+                                                                        pendingValidation = validation
+                                                                        pendingRestoreSourceTitle = "Google Drive (${driveItem.name})"
+                                                                        showRestoreDialog = true
+                                                                    } else {
+                                                                        validationErrorMessage = validation.errorReason ?: "Corrupt Drive file"
+                                                                    }
+                                                                } else {
+                                                                    Toast.makeText(context, "Download failed: ${downloadRes.exceptionOrNull()?.message}", Toast.LENGTH_SHORT).show()
+                                                                }
+                                                            }
+                                                        },
+                                                        modifier = Modifier.size(32.dp)
+                                                    ) {
+                                                        Icon(Icons.Default.CloudDownload, contentDescription = "Restore", tint = Color(0xFF0D9488), modifier = Modifier.size(18.dp))
+                                                    }
+
+                                                    IconButton(
+                                                        onClick = {
+                                                            coroutineScope.launch {
+                                                                val delRes = backupManager.deleteDriveBackup(context, driveItem.fileId)
+                                                                if (delRes.isSuccess) {
+                                                                    refreshLists()
+                                                                } else {
+                                                                    Toast.makeText(context, "Delete failed: ${delRes.exceptionOrNull()?.message}", Toast.LENGTH_SHORT).show()
+                                                                }
+                                                            }
+                                                        },
+                                                        modifier = Modifier.size(32.dp)
+                                                    ) {
+                                                        Icon(Icons.Default.DeleteOutline, contentDescription = "Delete", tint = Color(0xFFDC2626), modifier = Modifier.size(18.dp))
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 4. Automatic Backup & Auto Sync Settings Card
+        item {
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = Color.White),
+                border = BorderStroke(1.dp, Slate200),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Icon(Icons.Default.Schedule, contentDescription = null, tint = Color(0xFF7C3AED), modifier = Modifier.size(22.dp))
+                            Text(
+                                text = if (isUrdu) "خودکار بیک اپ اور شیڈول (Auto Sync)" else "Automatic Backup & Schedule",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 15.sp,
+                                color = Slate900
+                            )
+                        }
+
+                        Switch(
+                            checked = autoSyncSettings.isEnabled,
+                            onCheckedChange = { enabled ->
+                                val updated = autoSyncSettings.copy(isEnabled = enabled)
+                                autoSyncSettings = updated
+                                authManager.saveAutoSyncSettings(updated)
+                                if (enabled) {
+                                    backupManager.scheduleAutoSync(context, updated.intervalHours, updated.destination, updated.wifiOnly)
+                                } else {
+                                    backupManager.cancelAutoSync(context)
+                                }
+                            }
+                        )
+                    }
+
+                    Text(
+                        text = if (isUrdu) {
+                            "خودکار بیک اپ کو فعال کرنے سے ایپ پس منظر میں روزانہ یا ہر 6 گھنٹے بعد آپ کا کھاتہ اور بل کلاؤڈ پر محفوظ کر دیتی ہے۔"
+                        } else {
+                            "Auto-sync periodically uploads your changes in the background without interrupting your work."
+                        },
+                        fontSize = 11.5.sp,
+                        color = Slate600
+                    )
+
+                    AnimatedVisibility(visible = autoSyncSettings.isEnabled) {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            // Frequency selector
+                            Text(
+                                text = if (isUrdu) "بیک اپ شیڈول فریکوئنسی:" else "Backup Frequency:",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Slate800
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                listOf(
+                                    6 to if (isUrdu) "6 گھنٹے" else "6 Hours",
+                                    24 to if (isUrdu) "روزانہ (Daily)" else "Daily",
+                                    168 to if (isUrdu) "ہفتہ وار" else "Weekly"
+                                ).forEach { (hrs, label) ->
+                                    val isSelected = autoSyncSettings.intervalHours == hrs
+                                    FilterChip(
+                                        selected = isSelected,
+                                        onClick = {
+                                            val updated = autoSyncSettings.copy(intervalHours = hrs)
+                                            autoSyncSettings = updated
+                                            authManager.saveAutoSyncSettings(updated)
+                                            backupManager.scheduleAutoSync(context, hrs, updated.destination, updated.wifiOnly)
+                                        },
+                                        label = { Text(label, fontSize = 11.sp) },
+                                        colors = FilterChipDefaults.filterChipColors(
+                                            selectedContainerColor = Color(0xFF7C3AED),
+                                            selectedLabelColor = Color.White
+                                        )
+                                    )
+                                }
+                            }
+
+                            // Destination selector
+                            Text(
+                                text = if (isUrdu) "بیک اپ لوکیشن:" else "Destination Target:",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Slate800
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                listOf(
+                                    "BOTH" to if (isUrdu) "دونوں (سفارش)" else "Both (Best)",
+                                    "DRIVE" to if (isUrdu) "گوگل ڈرائیو" else "Google Drive",
+                                    "LOCAL" to if (isUrdu) "صرف فون" else "Phone Only"
+                                ).forEach { (dest, label) ->
+                                    val isSelected = autoSyncSettings.destination == dest
+                                    FilterChip(
+                                        selected = isSelected,
+                                        onClick = {
+                                            val updated = autoSyncSettings.copy(destination = dest)
+                                            autoSyncSettings = updated
+                                            authManager.saveAutoSyncSettings(updated)
+                                            backupManager.scheduleAutoSync(context, updated.intervalHours, dest, updated.wifiOnly)
+                                        },
+                                        label = { Text(label, fontSize = 11.sp) },
+                                        colors = FilterChipDefaults.filterChipColors(
+                                            selectedContainerColor = Color(0xFF0284C7),
+                                            selectedLabelColor = Color.White
+                                        )
+                                    )
+                                }
+                            }
+
+                            // Wi-Fi only toggle
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = if (isUrdu) "صرف وائی فائی پر بیک اپ لیں (Wi-Fi Only)" else "Upload Only on Wi-Fi",
+                                    fontSize = 12.sp,
+                                    color = Slate800
+                                )
+                                Switch(
+                                    checked = autoSyncSettings.wifiOnly,
+                                    onCheckedChange = { wifi ->
+                                        val updated = autoSyncSettings.copy(wifiOnly = wifi)
+                                        autoSyncSettings = updated
+                                        authManager.saveAutoSyncSettings(updated)
+                                        backupManager.scheduleAutoSync(context, updated.intervalHours, updated.destination, wifi)
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 5. Google Gemini AI Assistant & Official AI Studio Free Tier Card
         item {
             Card(
                 shape = RoundedCornerShape(16.dp),
@@ -441,7 +1195,6 @@ fun BackupSyncScreen(
                         }
                     }
 
-                    // Official Google AI Studio Free Tier Policy Explanation
                     Surface(
                         shape = RoundedCornerShape(10.dp),
                         color = Color(0xFFF0FDF4),
@@ -558,126 +1311,190 @@ fun BackupSyncScreen(
                 }
             }
         }
+    }
 
-        // 3. Google Drive Cloud Backup Section (Tied directly to the linked account)
-        item {
-            Card(
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
-                border = BorderStroke(1.dp, Slate200),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = if (isUrdu) "گوگل ڈرائیو اور کلاؤڈ بیک اپ" else "Google Drive & Cloud Backup",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 15.sp,
-                            color = Slate900
-                        )
-                        Icon(
-                            imageVector = Icons.Default.CloudSync,
-                            contentDescription = null,
-                            tint = Color(0xFF2563EB),
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
+    // Restore Inspection Preview & Confirmation Dialog
+    if (showRestoreDialog && pendingRestoreState != null && pendingValidation != null) {
+        val meta = pendingValidation!!.metadata
+        val restoreTarget = pendingRestoreState!!
 
-                    // Linked Account Notice
+        AlertDialog(
+            onDismissRequest = {
+                showRestoreDialog = false
+                pendingRestoreState = null
+                pendingValidation = null
+            },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Icon(Icons.Default.RestorePage, contentDescription = null, tint = DukanGreenPrimary)
+                    Text(
+                        text = if (isUrdu) "ڈیٹا بحالی کی پیشگی جانچ (Restore Preview)" else "Restore Data Preview",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 16.sp
+                    )
+                }
+            },
+            text = {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = if (isUrdu) "بیک اپ سورس: $pendingRestoreSourceTitle" else "Source: $pendingRestoreSourceTitle",
+                        fontSize = 12.sp,
+                        color = Slate600,
+                        fontWeight = FontWeight.SemiBold
+                    )
+
                     Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = if (profile.isLoggedIn) Color(0xFFF1F5F9) else Color(0xFFFFFBEB),
-                        border = BorderStroke(1.dp, if (profile.isLoggedIn) Color(0xFFE2E8F0) else Color(0xFFFDE68A)),
+                        shape = RoundedCornerShape(10.dp),
+                        color = Color(0xFFF8FAFC),
+                        border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Icon(
-                                imageVector = if (profile.isLoggedIn) Icons.Default.CheckCircle else Icons.Default.Info,
-                                contentDescription = null,
-                                tint = if (profile.isLoggedIn) Color(0xFF059669) else Color(0xFFD97706),
-                                modifier = Modifier.size(15.dp)
-                            )
+                        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Text(
-                                text = if (profile.isLoggedIn) {
-                                    if (isUrdu) "بیک اپ اکاؤنٹ: ${profile.email}" else "Backup Account: ${profile.email}"
-                                } else {
-                                    if (isUrdu) "بیک اپ کے لیے پہلے اوپر گوگل اکاؤنٹ منسلک کریں" else "Link Google account above for Drive backup"
-                                },
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Medium,
-                                color = if (profile.isLoggedIn) Slate800 else Color(0xFF92400E)
+                                text = "🏢 ${if (isUrdu) "دکان کا نام" else "Shop Name"}: ${meta?.shopName ?: restoreTarget.profile.shopName}",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Slate900
                             )
+                            if (!meta?.createdAt.isNullOrBlank()) {
+                                Text(
+                                    text = "📅 ${if (isUrdu) "تاریخ" else "Date"}: ${meta?.createdAt?.take(10)}",
+                                    fontSize = 11.sp,
+                                    color = Slate600
+                                )
+                            }
+                            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp), color = Slate200)
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text(text = "📦 ${if (isUrdu) "اسٹاک آئٹمز" else "Stock Items"}:", fontSize = 11.sp, color = Slate700)
+                                Text(text = "${meta?.inventoryCount ?: restoreTarget.inventory.size}", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text(text = "👥 ${if (isUrdu) "کسٹمر کھاتے" else "Customers"}:", fontSize = 11.sp, color = Slate700)
+                                Text(text = "${meta?.customerCount ?: restoreTarget.customers.size}", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text(text = "🏭 ${if (isUrdu) "سپلائرز" else "Suppliers"}:", fontSize = 11.sp, color = Slate700)
+                                Text(text = "${meta?.supplierCount ?: restoreTarget.suppliers.size}", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text(text = "💳 ${if (isUrdu) "ٹرانزیکشنز" else "Transactions"}:", fontSize = 11.sp, color = Slate700)
+                                Text(text = "${meta?.transactionCount ?: restoreTarget.transactions.size}", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
 
-                    if (profile.lastBackupDate != null) {
+                    // Safety Backup Checkbox
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.clickable { createSafetyBackupBeforeRestore = !createSafetyBackupBeforeRestore }
+                    ) {
+                        Checkbox(
+                            checked = createSafetyBackupBeforeRestore,
+                            onCheckedChange = { createSafetyBackupBeforeRestore = it }
+                        )
                         Text(
-                            text = if (isUrdu) "آخری کلاؤڈ بیک اپ: ${profile.lastBackupDate}" else "Last Cloud Backup: ${profile.lastBackupDate}",
+                            text = if (isUrdu) "بحالی سے قبل موجودہ ڈیٹا کا خودکار حفاظتی اسنیپ شاٹ بنائیں (سفارش)" else "Create safety snapshot of current data before restore",
                             fontSize = 11.5.sp,
-                            color = Slate600,
-                            fontWeight = FontWeight.SemiBold
+                            color = Slate800,
+                            lineHeight = 15.sp
                         )
                     }
 
-                    Button(
-                        onClick = {
-                            if (!profile.isLoggedIn) {
-                                launchNativeGoogleAccountPicker()
-                                return@Button
-                            }
-                            isBackingUp = true
-                            authManager.recordBackup()
-                            profile = authManager.getProfile()
-                            isBackingUp = false
-                            Toast.makeText(
-                                context,
-                                if (isUrdu) "گوگل ڈرائیو (${profile.email}) پر بیک اپ محفوظ ہو گیا!" else "Backup saved to Google Drive (${profile.email})!",
-                                Toast.LENGTH_LONG
-                            ).show()
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = DukanGreenPrimary),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth().height(44.dp)
+                    // Restore Mode Selector
+                    Text(
+                        text = if (isUrdu) "بحالی کا طریقہ منتخب کریں:" else "Select Restore Mode:",
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Slate800
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        if (isBackingUp) {
-                            CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Color.White, strokeWidth = 2.dp)
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(text = if (isUrdu) "بیک اپ لیا جا رہا ہے..." else "Backing up...")
-                        } else {
-                            Icon(Icons.Default.CloudUpload, contentDescription = "Backup", modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = if (isUrdu) "ابھی گوگل ڈرائیو پر بیک اپ لیں" else "Backup to Google Drive Now",
-                                fontWeight = FontWeight.Bold
+                        FilterChip(
+                            selected = restoreMode == RestoreMode.REPLACE_ALL,
+                            onClick = { restoreMode = RestoreMode.REPLACE_ALL },
+                            label = { Text(if (isUrdu) "مکمل تبدیلی (Replace)" else "Replace All", fontSize = 11.sp) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = Color(0xFFDC2626),
+                                selectedLabelColor = Color.White
                             )
-                        }
-                    }
-
-                    OutlinedButton(
-                        onClick = {
-                            Toast.makeText(
-                                context,
-                                if (isUrdu) "لوکل فائل محفوظ ہو گئی (Downloads/dukan_backup.json)" else "Exported to Downloads/dukan_backup.json",
-                                Toast.LENGTH_SHORT
-                            ).show()
-                        },
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth().height(44.dp)
-                    ) {
-                        Icon(Icons.Default.FileDownload, contentDescription = "Export", modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(text = if (isUrdu) "لوکل فائل محفوظ کریں (JSON)" else "Export Local Backup (JSON)", fontWeight = FontWeight.Bold)
+                        )
+                        FilterChip(
+                            selected = restoreMode == RestoreMode.MERGE,
+                            onClick = { restoreMode = RestoreMode.MERGE },
+                            label = { Text(if (isUrdu) "ضم کریں (Merge)" else "Merge", fontSize = 11.sp) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = DukanGreenPrimary,
+                                selectedLabelColor = Color.White
+                            )
+                        )
                     }
                 }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        coroutineScope.launch {
+                            val result = backupManager.restoreState(
+                                context = context,
+                                backupState = restoreTarget,
+                                mode = restoreMode,
+                                createSafetyBackup = createSafetyBackupBeforeRestore
+                            )
+                            showRestoreDialog = false
+                            pendingRestoreState = null
+                            pendingValidation = null
+                            refreshLists()
+
+                            if (result.success) {
+                                onRestoreState?.invoke(repository.appState.value)
+                                Toast.makeText(
+                                    context,
+                                    if (isUrdu) "کامیابی: ${result.message} (${result.itemsRestoredCount} آئٹمز)" else "Success: ${result.message}",
+                                    Toast.LENGTH_LONG
+                                ).show()
+                            } else {
+                                Toast.makeText(
+                                    context,
+                                    "Error: ${result.message}",
+                                    Toast.LENGTH_LONG
+                                ).show()
+                            }
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = DukanGreenPrimary)
+                ) {
+                    Text(if (isUrdu) "تصدیق اور بحال کریں" else "Confirm & Restore", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = {
+                    showRestoreDialog = false
+                    pendingRestoreState = null
+                    pendingValidation = null
+                }) {
+                    Text(if (isUrdu) "منسوخ" else "Cancel")
+                }
             }
-        }
+        )
+    }
+
+    // Validation Error Dialog
+    if (validationErrorMessage != null) {
+        AlertDialog(
+            onDismissRequest = { validationErrorMessage = null },
+            icon = { Icon(Icons.Default.ErrorOutline, contentDescription = null, tint = Color(0xFFDC2626)) },
+            title = { Text(if (isUrdu) "فائل میں خرابی (Invalid File)" else "Validation Failed") },
+            text = { Text(validationErrorMessage ?: "") },
+            confirmButton = {
+                Button(onClick = { validationErrorMessage = null }) {
+                    Text(if (isUrdu) "ٹھیک ہے" else "OK")
+                }
+            }
+        )
     }
 }
