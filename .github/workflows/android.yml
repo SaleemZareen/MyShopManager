@@ -10,38 +10,25 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout Source Code
         uses: actions/checkout@v4
 
-      - name: Set up Java Development Kit (JDK) 17
+      - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
-
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Accept Android SDK Licenses & Install Components
-        run: |
-          yes | sdkmanager --licenses || true
-          sdkmanager "platforms;android-35" "build-tools;35.0.0" "platform-tools" || true
+          cache: 'gradle'
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
-        with:
-          gradle-version: '8.7'
 
-      - name: Ensure Pristine Gradle Wrapper
-        run: |
-          gradle wrapper --gradle-version 8.7
-          chmod +x ./gradlew
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
 
-      - name: Build Debug APK with Gradle
-        run: |
-          ./gradlew assembleDebug --no-daemon --stacktrace -x test -x lint
+      - name: Build Debug APK
+        run: ./gradlew assembleDebug --no-daemon --stacktrace -x test -x lint
 
       - name: Upload Generated APK as Artifact
         uses: actions/upload-artifact@v4
@@ -49,5 +36,3 @@ jobs:
           name: MyShopManager-Debug-APK
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
-
-
