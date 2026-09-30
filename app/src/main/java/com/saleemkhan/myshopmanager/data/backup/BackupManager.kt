@@ -5,12 +5,15 @@ import android.net.Uri
 import androidx.work.*
 import com.saleemkhan.myshopmanager.BackupSyncWorker
 import com.saleemkhan.myshopmanager.data.GoogleAuthManager
+import com.saleemkhan.myshopmanager.data.firebase.FirebaseCloudBackupProvider
+import com.saleemkhan.myshopmanager.data.firebase.CloudBackupInfo
 import com.saleemkhan.myshopmanager.model.AppState
 import java.util.concurrent.TimeUnit
 
 class BackupManager private constructor(
     val localProvider: LocalBackupProvider = LocalBackupProvider(),
     val driveProvider: GoogleDriveBackupProvider = GoogleDriveBackupProvider(),
+    val firebaseProvider: FirebaseCloudBackupProvider = FirebaseCloudBackupProvider(),
     val serializer: BackupSerializer = BackupSerializer(),
     val validator: BackupValidator = BackupValidator(serializer),
     val restoreManager: RestoreManager = RestoreManager(localProvider)
@@ -61,6 +64,20 @@ class BackupManager private constructor(
     suspend fun downloadDriveBackup(context: Context, fileId: String) = driveProvider.downloadBackup(context, fileId)
 
     suspend fun deleteDriveBackup(context: Context, fileId: String) = driveProvider.deleteBackup(context, fileId)
+
+    suspend fun backupToFirebaseCloud(context: Context, state: AppState): Result<CloudBackupInfo> {
+        val result = firebaseProvider.uploadBackup(context, state)
+        if (result.isSuccess) {
+            GoogleAuthManager.getInstance(context).recordBackup()
+        }
+        return result
+    }
+
+    suspend fun getFirebaseCloudBackupInfo(context: Context) = firebaseProvider.getCloudBackupInfo(context)
+
+    suspend fun downloadFirebaseCloudBackup(context: Context) = firebaseProvider.downloadBackup(context)
+
+    suspend fun deleteFirebaseCloudBackup(context: Context) = firebaseProvider.deleteCloudBackup(context)
 
     suspend fun restoreState(
         context: Context,

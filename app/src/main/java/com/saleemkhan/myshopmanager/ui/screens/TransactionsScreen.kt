@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.saleemkhan.myshopmanager.data.accounting.AccountingEngine
 import com.saleemkhan.myshopmanager.model.*
 import com.saleemkhan.myshopmanager.ui.theme.*
 import com.saleemkhan.myshopmanager.utils.FormatUtils
@@ -74,45 +75,29 @@ fun TransactionsScreen(
         customStartDate,
         customEndDate
     ) {
-        val todayIso = FormatUtils.getTodayIsoDate()
         state.transactions.filter { tx ->
-            when (filterDateRange) {
-                TransactionDateFilter.ALL -> true
-                TransactionDateFilter.TODAY -> tx.date.startsWith(todayIso)
-                TransactionDateFilter.YESTERDAY -> true
-                TransactionDateFilter.THIS_MONTH -> {
-                    if (todayIso.length >= 7) tx.date.startsWith(todayIso.substring(0, 7)) else true
-                }
-                TransactionDateFilter.LAST_MONTH -> true
-                TransactionDateFilter.CUSTOM -> {
-                    val txDateOnly = if (tx.date.length >= 10) tx.date.substring(0, 10) else tx.date
-                    val afterStart = customStartDate.isBlank() || txDateOnly >= customStartDate
-                    val beforeEnd = customEndDate.isBlank() || txDateOnly <= customEndDate
-                    afterStart && beforeEnd
-                }
-            }
+            AccountingEngine.matchesTransactionDateFilter(
+                txDateStr = tx.date,
+                filter = filterDateRange,
+                customStart = customStartDate,
+                customEnd = customEndDate
+            )
         }
     }
 
-    // Totals for Inflow & Outflow tabs based on current date range
-    val totalInflow = remember(dateFilteredTransactions) {
-        dateFilteredTransactions
-            .filter { it.type == TransactionType.SALE || it.type == TransactionType.RECEIPT }
-            .sumOf { it.amount }
+    // Totals for Inflow & Outflow tabs based on current date range (Excludes credit sales/purchases)
+    val cashFlowMetrics = remember(dateFilteredTransactions) {
+        AccountingEngine.calculateCashFlow(dateFilteredTransactions)
     }
-
-    val totalOutflow = remember(dateFilteredTransactions) {
-        dateFilteredTransactions
-            .filter { it.type == TransactionType.PURCHASE || it.type == TransactionType.EXPENSE || it.type == TransactionType.PAYMENT }
-            .sumOf { it.amount }
-    }
+    val totalInflow = cashFlowMetrics.cashInflow
+    val totalOutflow = cashFlowMetrics.cashOutflow
 
     val inflowCount = remember(dateFilteredTransactions) {
-        dateFilteredTransactions.count { it.type == TransactionType.SALE || it.type == TransactionType.RECEIPT }
+        dateFilteredTransactions.count { (it.type == TransactionType.SALE && it.paymentMethod != PaymentMethod.CREDIT) || it.type == TransactionType.RECEIPT || it.type == TransactionType.LOAN_TAKEN }
     }
 
     val outflowCount = remember(dateFilteredTransactions) {
-        dateFilteredTransactions.count { it.type == TransactionType.PURCHASE || it.type == TransactionType.EXPENSE || it.type == TransactionType.PAYMENT }
+        dateFilteredTransactions.count { (it.type == TransactionType.PURCHASE && it.paymentMethod != PaymentMethod.CREDIT) || it.type == TransactionType.EXPENSE || it.type == TransactionType.PAYMENT || it.type == TransactionType.LOAN_GIVEN }
     }
 
     // Filtered transactions incorporating flow filter, type filter and search
@@ -124,8 +109,8 @@ fun TransactionsScreen(
     ) {
         dateFilteredTransactions.filter { tx ->
             val matchesFlow = when (flowFilter) {
-                "INFLOW" -> tx.type == TransactionType.SALE || tx.type == TransactionType.RECEIPT
-                "OUTFLOW" -> tx.type == TransactionType.PURCHASE || tx.type == TransactionType.EXPENSE || tx.type == TransactionType.PAYMENT
+                "INFLOW" -> (tx.type == TransactionType.SALE && tx.paymentMethod != PaymentMethod.CREDIT) || tx.type == TransactionType.RECEIPT || tx.type == TransactionType.LOAN_TAKEN
+                "OUTFLOW" -> (tx.type == TransactionType.PURCHASE && tx.paymentMethod != PaymentMethod.CREDIT) || tx.type == TransactionType.EXPENSE || tx.type == TransactionType.PAYMENT || tx.type == TransactionType.LOAN_GIVEN
                 else -> true
             }
 

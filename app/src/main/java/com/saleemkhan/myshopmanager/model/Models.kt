@@ -85,6 +85,7 @@ data class Transaction(
     val category: String = "",
     val paymentMethod: PaymentMethod = PaymentMethod.CASH,
     val partyName: String? = null,
+    val partyId: String? = null,
     val invoiceNo: String? = null,
     val date: String = "", // ISO String
     val notes: String? = null,
@@ -96,7 +97,12 @@ data class Transaction(
     val adjustmentReason: String? = null,
     val balancingTreatment: String? = null,
     val sourcePolicy: String? = null,
-    val loanAccountId: String? = null
+    val loanAccountId: String? = null,
+    val accountId: String? = null,
+    val toAccountId: String? = null,
+    val isCogsEstimated: Boolean = false,
+    val isCogsMissing: Boolean = false,
+    val legacyClassification: String? = null
 )
 
 data class InventoryItem(
@@ -104,13 +110,14 @@ data class InventoryItem(
     val name: String = "",
     val category: String = "",
     val unit: String = "pcs",
-    val purchasePrice: Double = 0.0,
+    val purchasePrice: Double = 0.0, // Represents current Weighted Average Unit Cost (AVCO)
     val salePrice: Double = 0.0,
     val quantity: Double = 0.0,
     val minStockAlert: Double = 5.0,
     val barcode: String? = null,
     val sku: String? = null,
     val openingStock: Double = 0.0,
+    val openingCostPrice: Double = 0.0,
     val purchasedQty: Double = 0.0,
     val soldQty: Double = 0.0,
     val damagedQty: Double = 0.0,
@@ -127,7 +134,8 @@ data class CustomerParty(
     val totalCredit: Double = 0.0,
     val lastTransactionDate: String = "",
     val notes: String? = null,
-    val status: String? = "ACTIVE"
+    val status: String? = "ACTIVE",
+    val openingBalance: Double = 0.0
 )
 
 data class SupplierParty(
@@ -137,7 +145,8 @@ data class SupplierParty(
     val totalPayable: Double = 0.0,
     val dueDate: String? = null,
     val notes: String? = null,
-    val status: String? = "ACTIVE"
+    val status: String? = "ACTIVE",
+    val openingBalance: Double = 0.0
 )
 
 data class BankAccount(
@@ -146,7 +155,8 @@ data class BankAccount(
     val bankName: String = "",
     val accountNumber: String = "",
     val type: String = "CASH", // CASH, BANK, WALLET
-    val balance: Double = 0.0
+    val balance: Double = 0.0,
+    val openingBalance: Double = 0.0
 )
 
 data class BusinessAsset(

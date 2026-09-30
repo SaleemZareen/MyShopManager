@@ -49,11 +49,11 @@ fun KhataScreen(
     var paymentAmountInput by remember { mutableStateOf("") }
 
     val totalCustomerUdhaar = remember(state.customers) {
-        state.customers.filter { it.status != "ARCHIVED" && it.status != "CLOSED" }.sumOf { it.totalCredit }
+        state.customers.sumOf { it.totalCredit }
     }
 
     val totalSupplierPayable = remember(state.suppliers) {
-        state.suppliers.filter { it.status != "ARCHIVED" && it.status != "CLOSED" }.sumOf { it.totalPayable }
+        state.suppliers.sumOf { it.totalPayable }
     }
 
     val activeCustomerCount = remember(state.customers) {

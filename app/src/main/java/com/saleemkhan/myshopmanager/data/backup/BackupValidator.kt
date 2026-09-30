@@ -28,13 +28,15 @@ class BackupValidator(
                 )
             }
 
-            // Checksum verification if header checksum exists
+            // Strict checksum verification if header checksum exists
             if (payload.header.checksum.isNotBlank()) {
-                val dataJson = com.google.gson.Gson().toJson(appState)
+                val dataJson = com.google.gson.GsonBuilder().create().toJson(appState)
                 val computedSha = serializer.calculateSha256(dataJson)
                 if (computedSha.isNotEmpty() && payload.header.checksum.isNotEmpty() && computedSha != payload.header.checksum) {
-                    // Checksum mismatch might indicate tampering or corruption
-                    // We can still allow with warning or strict check
+                    return ValidationResult(
+                        isValid = false,
+                        errorReason = "Checksum integrity mismatch. File may be corrupted or modified / فائل کے سیکیورٹی چیک سم میں خرابی ہے"
+                    )
                 }
             }
 

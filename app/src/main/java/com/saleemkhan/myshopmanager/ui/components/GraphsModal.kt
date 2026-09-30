@@ -36,6 +36,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.saleemkhan.myshopmanager.data.accounting.AccountingEngine
 import com.saleemkhan.myshopmanager.model.AppState
 import com.saleemkhan.myshopmanager.model.PaymentMethod
 import com.saleemkhan.myshopmanager.model.Transaction
@@ -298,45 +299,16 @@ fun GraphsModal(
             // ==================== 6. ANALYTIC (PROFIT & COMPARISON) TAB ====================
             GraphCategoryTab.ANALYTIC -> {
                 if (chartType == ModalChartType.PIE || chartType == ModalChartType.DONUT) {
-                    val netProfit = (totalSales - (totalPurchases * 0.85) - totalExpenses).coerceAtLeast(0.0)
+                    val periodProfitRes = AccountingEngine.calculatePeriodProfit(periodTransactions)
+                    val netProfit = periodProfitRes.netProfit
                     listOf(
                         UnifiedChartPoint("ana_sales", if (isUrdu) "کل فروخت (Sales)" else "Total Sales", totalSales, Color(0xFF059669)),
                         UnifiedChartPoint("ana_pur", if (isUrdu) "خریداری لاگت (Purchases)" else "Procurement Cost", totalPurchases, Color(0xFF4F46E5)),
                         UnifiedChartPoint("ana_exp", if (isUrdu) "دکان اخراجات (Expenses)" else "Shop Expenses", totalExpenses, Color(0xFFE11D48)),
-                        UnifiedChartPoint("ana_profit", if (isUrdu) "خالص منافع (Net Profit)" else "Estimated Net Profit", netProfit, Color(0xFF0D9488))
+                        UnifiedChartPoint("ana_profit", if (isUrdu) "خالص منافع (Net Profit)" else "Net Profit", netProfit, Color(0xFF0D9488))
                     )
                 } else {
-                    // Profit trend over selected period
-                    val cal = Calendar.getInstance()
-                    val count = when (selectedPeriod) {
-                        ChartPeriod.TODAY -> 4
-                        ChartPeriod.THIS_WEEK -> 7
-                        ChartPeriod.THIS_MONTH -> 4
-                        ChartPeriod.THIS_YEAR -> 12
-                        ChartPeriod.ALL_TIME -> 6
-                    }
-                    val points = mutableListOf<UnifiedChartPoint>()
-                    for (i in (count - 1) downTo 0) {
-                        val label = when (selectedPeriod) {
-                            ChartPeriod.TODAY -> listOf("8-11 AM", "11-2 PM", "2-5 PM", "5-9 PM")[3 - (i % 4)]
-                            ChartPeriod.THIS_WEEK -> {
-                                val c = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -i) }
-                                sdfDisplayDay.format(c.time)
-                            }
-                            ChartPeriod.THIS_MONTH -> "${if (isUrdu) "ہفتہ" else "Wk"} ${4 - i}"
-                            ChartPeriod.THIS_YEAR -> {
-                                val c = Calendar.getInstance().apply { set(Calendar.MONTH, (Calendar.getInstance().get(Calendar.MONTH) - i + 12) % 12) }
-                                sdfMonthName.format(c.time)
-                            }
-                            ChartPeriod.ALL_TIME -> {
-                                val c = Calendar.getInstance().apply { add(Calendar.MONTH, -i * 2) }
-                                sdfMonthName.format(c.time)
-                            }
-                        }
-                        val estProfit = ((totalSales - totalPurchases * 0.85 - totalExpenses) * (0.15 + 0.1 * (i % 3))).coerceAtLeast(0.0)
-                        points.add(UnifiedChartPoint("ana_pt_$i", label, estProfit, Color(0xFF0D9488)))
-                    }
-                    points
+                    buildProfitTimeSeriesPoints(periodTransactions, selectedPeriod, Color(0xFF0D9488), palette, isUrdu)
                 }
             }
 
@@ -1047,6 +1019,98 @@ fun GraphsModal(
 }
 
 // ---------------------- HELPER FOR TIME-SERIES POINTS ----------------------
+
+private fun buildProfitTimeSeriesPoints(
+    txs: List<Transaction>,
+    period: ChartPeriod,
+    primaryColor: Color,
+    palette: List<Color>,
+    isUrdu: Boolean
+): List<UnifiedChartPoint> {
+    val sdfDate = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+    val sdfDisplayDay = SimpleDateFormat("dd MMM", Locale.US)
+    val sdfMonthName = SimpleDateFormat("MMM", Locale.US)
+
+    return when (period) {
+        ChartPeriod.TODAY -> {
+            val slots = listOf(
+                Pair(if (isUrdu) "صبح 8-12" else "8-12 AM", 8..11),
+                Pair(if (isUrdu) "دوپہر 12-4" else "12-4 PM", 12..15),
+                Pair(if (isUrdu) "شام 4-8" else "4-8 PM", 16..19),
+                Pair(if (isUrdu) "رات 8-12" else "8-12 PM", 20..23)
+            )
+            slots.mapIndexed { idx, (label, range) ->
+                val slotTxs = txs.filter { t ->
+                    val hour = try { t.date.drop(11).take(2).toInt() } catch (_: Exception) { 10 }
+                    hour in range
+                }
+                val profit = AccountingEngine.calculatePeriodProfit(slotTxs).netProfit
+                UnifiedChartPoint("profit_today_$idx", label, profit, palette[idx % palette.size])
+            }
+        }
+        ChartPeriod.THIS_WEEK -> {
+            val daysList = (6 downTo 0).map { i ->
+                val c = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -i) }
+                val iso = sdfDate.format(c.time)
+                val label = sdfDisplayDay.format(c.time)
+                Pair(iso, label)
+            }
+            daysList.mapIndexed { idx, (iso, label) ->
+                val dayTxs = txs.filter { it.date.take(10) == iso }
+                val profit = AccountingEngine.calculatePeriodProfit(dayTxs).netProfit
+                UnifiedChartPoint("profit_week_$idx", label, profit, palette[idx % palette.size])
+            }
+        }
+        ChartPeriod.THIS_MONTH -> {
+            val intervals = listOf(
+                Pair("1-7", 1..7),
+                Pair("8-14", 8..14),
+                Pair("15-21", 15..21),
+                Pair("22-31", 22..31)
+            )
+            intervals.mapIndexed { idx, (label, range) ->
+                val intTxs = txs.filter { t ->
+                    val day = try { t.date.take(10).drop(8).toInt() } catch (_: Exception) { 1 }
+                    day in range
+                }
+                val profit = AccountingEngine.calculatePeriodProfit(intTxs).netProfit
+                UnifiedChartPoint("profit_month_$idx", "${if (isUrdu) "تاریخ" else "Days"} $label", profit, palette[idx % palette.size])
+            }
+        }
+        ChartPeriod.THIS_YEAR -> {
+            val months = (0..11).map { m ->
+                val c = Calendar.getInstance().apply { set(Calendar.MONTH, m) }
+                val label = sdfMonthName.format(c.time)
+                Pair(m, label)
+            }
+            months.mapIndexed { idx, (m, label) ->
+                val monthTxs = txs.filter { t ->
+                    try {
+                        val txM = t.date.drop(5).take(2).toInt() - 1
+                        txM == m
+                    } catch (_: Exception) { false }
+                }
+                val profit = AccountingEngine.calculatePeriodProfit(monthTxs).netProfit
+                UnifiedChartPoint("profit_yr_$idx", label, profit, palette[idx % palette.size])
+            }
+        }
+        ChartPeriod.ALL_TIME -> {
+            val months = (5 downTo 0).map { i ->
+                val c = Calendar.getInstance().apply { add(Calendar.MONTH, -i) }
+                val label = sdfMonthName.format(c.time)
+                val yrShort = c.get(Calendar.YEAR).toString().takeLast(2)
+                val yrFull = c.get(Calendar.YEAR).toString()
+                val monthPrefix = String.format(Locale.US, "%s-%02d", yrFull, c.get(Calendar.MONTH) + 1)
+                Triple("$label $yrShort", monthPrefix, i)
+            }
+            months.mapIndexed { idx, (label, prefix, _) ->
+                val monthTxs = txs.filter { it.date.take(7) == prefix }
+                val profit = AccountingEngine.calculatePeriodProfit(monthTxs).netProfit
+                UnifiedChartPoint("profit_all_$idx", label, profit, palette[idx % palette.size])
+            }
+        }
+    }
+}
 
 private fun buildTimeSeriesPoints(
     txs: List<Transaction>,

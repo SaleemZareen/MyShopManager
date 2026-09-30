@@ -59,7 +59,7 @@ class RestoreManager(
         }
     }
 
-    private fun mergeStates(current: AppState, incoming: AppState): AppState {
+    fun mergeStates(current: AppState, incoming: AppState): AppState {
         // 1. Transactions merge by unique ID
         val currentTxIds = current.transactions.map { it.id }.toSet()
         val newTx = incoming.transactions.filter { it.id !in currentTxIds }
@@ -114,7 +114,7 @@ class RestoreManager(
             ntn = currentProf.ntn.ifBlank { incomingProf.ntn }
         )
 
-        return current.copy(
+        val rawMerged = current.copy(
             profile = mergedProfile,
             transactions = mergedTx,
             inventory = mergedInventory,
@@ -125,5 +125,6 @@ class RestoreManager(
             businessAssets = mergedBiz,
             personalAssets = mergedPer
         )
+        return com.saleemkhan.myshopmanager.data.accounting.AccountingEngine.rebuildBalances(rawMerged)
     }
 }

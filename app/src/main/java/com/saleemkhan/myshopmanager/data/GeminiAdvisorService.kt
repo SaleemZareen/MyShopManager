@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import com.google.gson.Gson
 import com.google.gson.JsonObject
+import com.saleemkhan.myshopmanager.data.accounting.AccountingEngine
 import com.saleemkhan.myshopmanager.model.AppState
 import com.saleemkhan.myshopmanager.model.TransactionType
 import com.saleemkhan.myshopmanager.utils.FormatUtils
@@ -66,7 +67,13 @@ class GeminiAdvisorService(private val context: Context? = null) {
         val lowStock = state.inventory.count { it.quantity <= it.minStockAlert }
         val cashBalance = state.bankAccounts.sumOf { it.balance }
 
-        val estimatedProfit = (todaySales * 0.18) - todayExpenses
+        val todayIso = FormatUtils.getTodayIsoDate()
+        val todayTransactions = state.transactions.filter {
+            val d = if (it.date.length >= 10) it.date.substring(0, 10) else it.date
+            d == todayIso
+        }
+        val periodProfitRes = AccountingEngine.calculatePeriodProfit(todayTransactions)
+        val canonicalTodayProfit = periodProfitRes.netProfit
         val topDebtors = state.customers
             .sortedByDescending { it.totalCredit }
             .filter { it.totalCredit > 0 }
@@ -78,7 +85,7 @@ class GeminiAdvisorService(private val context: Context? = null) {
             shopName = state.profile.shopName.ifBlank { "میری دکان" },
             todaySales = todaySales,
             todayExpenses = todayExpenses,
-            todayProfit = estimatedProfit.coerceAtLeast(0.0),
+            todayProfit = canonicalTodayProfit,
             todayRecovery = todayRecovery,
             totalCreditUdhaar = totalCredit,
             totalSupplierPayable = totalPayable,

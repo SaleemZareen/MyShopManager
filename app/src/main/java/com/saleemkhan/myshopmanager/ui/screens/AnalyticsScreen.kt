@@ -22,7 +22,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.saleemkhan.myshopmanager.data.accounting.AccountingEngine
 import com.saleemkhan.myshopmanager.model.AppState
+import com.saleemkhan.myshopmanager.model.Transaction
 import com.saleemkhan.myshopmanager.model.TransactionType
 import com.saleemkhan.myshopmanager.ui.theme.*
 import com.saleemkhan.myshopmanager.utils.FormatUtils
@@ -65,9 +67,9 @@ fun AnalyticsScreen(
             monthBuckets.add(Triple(y, m, label))
         }
 
-        val monthlyMap = mutableMapOf<String, DoubleArray>() // [sales, purchases, expenses]
+        val monthlyTxMap = mutableMapOf<String, MutableList<Transaction>>()
         monthBuckets.forEach { (_, _, label) ->
-            monthlyMap[label] = DoubleArray(3)
+            monthlyTxMap[label] = mutableListOf()
         }
 
         val parser = SimpleDateFormat("yyyy-MM-dd", Locale.US)
@@ -81,31 +83,21 @@ fun AnalyticsScreen(
                     val yrShort = y.toString().takeLast(2)
                     val label = "${months[m]} $yrShort"
 
-                    val arr = monthlyMap[label]
-                    if (arr != null) {
-                        when (t.type) {
-                            TransactionType.SALE -> arr[0] += t.amount
-                            TransactionType.PURCHASE -> arr[1] += t.amount
-                            TransactionType.EXPENSE -> arr[2] += t.amount
-                            else -> {}
-                        }
-                    }
+                    monthlyTxMap[label]?.add(t)
                 }
             } catch (_: Exception) {}
         }
 
         monthBuckets.map { (_, _, label) ->
-            val arr = monthlyMap[label] ?: DoubleArray(3)
-            val sales = arr[0]
-            val purchases = arr[1]
-            val expenses = arr[2]
-            // profit = sales - (purchases * 0.85) - expenses (matching React formula)
-            val profit = (sales - (purchases * 0.85) - expenses).coerceAtLeast(0.0)
+            val txList = monthlyTxMap[label] ?: emptyList()
+            val sales = txList.filter { it.type == TransactionType.SALE }.sumOf { it.amount }
+            val purchases = txList.filter { it.type == TransactionType.PURCHASE }.sumOf { it.amount }
+            val profitResult = AccountingEngine.calculatePeriodProfit(txList)
             MonthlyTrendItem(
                 monthLabel = label,
                 sales = sales,
                 purchases = purchases,
-                profit = profit
+                profit = profitResult.netProfit
             )
         }
     }
@@ -138,17 +130,16 @@ fun AnalyticsScreen(
         }
     }
 
-    // Summary calculations
-    val totalSales = remember(state.transactions) {
-        state.transactions.filter { it.type == TransactionType.SALE }.sumOf { it.amount }
+    // Summary calculations via AccountingEngine
+    val lifetimeProfitResult = remember(state.transactions) {
+        AccountingEngine.calculatePeriodProfit(state.transactions)
     }
+    val totalSales = lifetimeProfitResult.netRevenue
     val totalPurchases = remember(state.transactions) {
         state.transactions.filter { it.type == TransactionType.PURCHASE }.sumOf { it.amount }
     }
-    val totalExpenses = remember(state.transactions) {
-        state.transactions.filter { it.type == TransactionType.EXPENSE }.sumOf { it.amount }
-    }
-    val overallProfit = (totalSales - (totalPurchases * 0.85) - totalExpenses).coerceAtLeast(0.0)
+    val totalExpenses = lifetimeProfitResult.operatingExpenses
+    val overallProfit = lifetimeProfitResult.netProfit
 
     LazyColumn(
         modifier = Modifier

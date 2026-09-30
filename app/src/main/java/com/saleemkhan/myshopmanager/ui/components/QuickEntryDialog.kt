@@ -241,14 +241,16 @@ fun QuickEntryDialog(
             val party = customer?.name ?: (if (isUrdu) "گاہک وصولی" else "Customer Recovery")
             val desc = "Udhaar Recovery from $party"
             val newTx = Transaction(
-                id = "tx_${System.currentTimeMillis()}",
+                id = editingTransaction?.id ?: "tx_${System.currentTimeMillis()}",
                 type = TransactionType.RECEIPT,
                 amount = amt,
                 category = "Udhaar Recovery",
                 paymentMethod = PaymentMethod.CASH,
                 partyName = party,
+                partyId = customer?.id,
                 date = receiptDate.ifBlank { FormatUtils.getTodayIsoDate() },
-                notes = if (receiptNotes.isNotBlank()) "$desc - $receiptNotes" else desc
+                notes = if (receiptNotes.isNotBlank()) "$desc - $receiptNotes" else desc,
+                accountId = receiptAccountId
             )
 
             onSubmit(
@@ -737,6 +739,10 @@ fun QuickEntryDialog(
                                                 val itemsSummary = cartItems.joinToString(", ") { "${it.item.name} x ${it.quantity.toInt()}" }
                                                 val desc = "POS Sale: $itemsSummary"
 
+                                                val totalQty = cartItems.sumOf { it.quantity }
+                                                val totalCost = cartItems.sumOf { it.quantity * it.item.purchasePrice }
+                                                val avcoUnitCost = if (totalQty > 0) totalCost / totalQty else (cartItems.firstOrNull()?.item?.purchasePrice ?: 0.0)
+
                                                 val newTx = Transaction(
                                                     id = editingTransaction?.id ?: "tx_${System.currentTimeMillis()}",
                                                     type = TransactionType.SALE,
@@ -744,9 +750,15 @@ fun QuickEntryDialog(
                                                     category = cartItems.firstOrNull()?.item?.category ?: "Sale",
                                                     paymentMethod = salePaymentMethod,
                                                     partyName = party,
+                                                    partyId = customer?.id,
                                                     date = saleDate,
                                                     notes = if (saleNotes.isNotBlank()) "$desc - $saleNotes" else desc,
-                                                    itemId = cartItems.firstOrNull()?.item?.id
+                                                    itemId = if (cartItems.size == 1) cartItems.first().item.id else null,
+                                                    qtyChange = totalQty,
+                                                    unitCost = avcoUnitCost,
+                                                    totalValueChange = totalCost,
+                                                    accountId = if (salePaymentMethod != PaymentMethod.CREDIT) saleAccountId else null,
+                                                    isCogsMissing = cartItems.isEmpty() || totalCost <= 0.0
                                                 )
 
                                                 val custChange = if (salePaymentMethod == PaymentMethod.CREDIT && customer != null) netSaleTotal else 0.0
@@ -793,8 +805,11 @@ fun QuickEntryDialog(
                                                     category = "Direct Sale",
                                                     paymentMethod = salePaymentMethod,
                                                     partyName = party,
+                                                    partyId = customer?.id,
                                                     date = saleDate,
-                                                    notes = if (saleNotes.isNotBlank()) "$desc - $saleNotes" else desc
+                                                    notes = if (saleNotes.isNotBlank()) "$desc - $saleNotes" else desc,
+                                                    accountId = if (salePaymentMethod != PaymentMethod.CREDIT) saleAccountId else null,
+                                                    isCogsMissing = true
                                                 )
                                                 val custChange = if (salePaymentMethod == PaymentMethod.CREDIT && customer != null) netSaleTotal else 0.0
 
@@ -881,16 +896,22 @@ fun QuickEntryDialog(
                                                 else -> purchaseAccountId
                                             }
 
+                                            val netPurchaseUnitCost = if (qty > 0) totalCost / qty else cost
                                             val newTx = Transaction(
-                                                id = "tx_${System.currentTimeMillis()}",
+                                                id = editingTransaction?.id ?: "tx_${System.currentTimeMillis()}",
                                                 type = TransactionType.PURCHASE,
                                                 amount = if (purchasePaymentTerm == "PARTIAL_CREDIT" && paidAmt > 0) paidAmt else totalCost,
                                                 category = item?.category ?: "Purchase",
                                                 paymentMethod = actualPaymentMethod,
                                                 partyName = party,
+                                                partyId = supplier?.id,
                                                 date = purchaseDate,
                                                 notes = if (purchaseNotes.isNotBlank()) "$desc - $purchaseNotes" else desc,
-                                                itemId = item?.id
+                                                itemId = item?.id,
+                                                qtyChange = qty,
+                                                unitCost = netPurchaseUnitCost,
+                                                totalValueChange = totalCost,
+                                                accountId = finalTargetAccId
                                             )
 
                                             onSubmit(
@@ -946,14 +967,15 @@ fun QuickEntryDialog(
                                             val selectedAcc = state.bankAccounts.find { it.id == expenseAccountId }
                                             val payMethod = if (selectedAcc?.type == "BANK") PaymentMethod.BANK else PaymentMethod.CASH
                                             val newTx = Transaction(
-                                                id = "tx_${System.currentTimeMillis()}",
+                                                id = editingTransaction?.id ?: "tx_${System.currentTimeMillis()}",
                                                 type = TransactionType.EXPENSE,
                                                 amount = amt,
                                                 category = expenseCategory,
                                                 paymentMethod = payMethod,
                                                 partyName = expensePaidTo.ifBlank { expenseCategory },
                                                 date = expenseDate.ifBlank { FormatUtils.getTodayIsoDate() },
-                                                notes = if (expenseNotes.isNotBlank()) "$desc - $expenseNotes" else desc
+                                                notes = if (expenseNotes.isNotBlank()) "$desc - $expenseNotes" else desc,
+                                                accountId = expenseAccountId
                                             )
 
                                             onSubmit(
@@ -1043,14 +1065,16 @@ fun QuickEntryDialog(
                                             val party = supplier?.name ?: (if (isUrdu) "سپلائر ادائیگی" else "Supplier Payment")
                                             val desc = "Payment to $party"
                                             val newTx = Transaction(
-                                                id = "tx_${System.currentTimeMillis()}",
+                                                id = editingTransaction?.id ?: "tx_${System.currentTimeMillis()}",
                                                 type = TransactionType.PAYMENT,
                                                 amount = amt,
                                                 category = "Supplier Payment",
                                                 paymentMethod = PaymentMethod.CASH,
                                                 partyName = party,
+                                                partyId = supplier?.id,
                                                 date = paymentDate.ifBlank { FormatUtils.getTodayIsoDate() },
-                                                notes = if (paymentNotes.isNotBlank()) "$desc - $paymentNotes" else desc
+                                                notes = if (paymentNotes.isNotBlank()) "$desc - $paymentNotes" else desc,
+                                                accountId = paymentAccountId
                                             )
 
                                             onSubmit(
@@ -1106,14 +1130,16 @@ fun QuickEntryDialog(
                                             val toAcc = state.bankAccounts.find { it.id == transferToAccountId }
                                             val desc = "Transfer from ${fromAcc?.accountTitle ?: "Account"} to ${toAcc?.accountTitle ?: "Account"}"
                                             val newTx = Transaction(
-                                                id = "tx_${System.currentTimeMillis()}",
+                                                id = editingTransaction?.id ?: "tx_${System.currentTimeMillis()}",
                                                 type = TransactionType.TRANSFER,
                                                 amount = amt,
                                                 category = "Fund Transfer",
                                                 paymentMethod = PaymentMethod.BANK,
                                                 partyName = toAcc?.accountTitle ?: "Transfer",
                                                 date = transferDate.ifBlank { FormatUtils.getTodayIsoDate() },
-                                                notes = if (transferNotes.isNotBlank()) "$desc - $transferNotes" else desc
+                                                notes = if (transferNotes.isNotBlank()) "$desc - $transferNotes" else desc,
+                                                accountId = transferFromAccountId,
+                                                toAccountId = transferToAccountId
                                             )
                                             onSubmit(newTx, null, 0.0, null, 0.0, null, 0.0, transferFromAccountId)
                                             onClose()
@@ -1158,14 +1184,15 @@ fun QuickEntryDialog(
                                             }
                                             val desc = "${if (isGiven) "Loan Given to" else "Loan Taken from"} $loanPartyName"
                                             val newTx = Transaction(
-                                                id = "tx_${System.currentTimeMillis()}",
+                                                id = editingTransaction?.id ?: "tx_${System.currentTimeMillis()}",
                                                 type = if (isGiven) TransactionType.LOAN_GIVEN else TransactionType.LOAN_TAKEN,
                                                 amount = amt,
                                                 category = if (isGiven) "Loan Given" else "Loan Taken",
                                                 paymentMethod = PaymentMethod.CASH,
                                                 partyName = loanPartyName,
                                                 date = loanDate.ifBlank { FormatUtils.getTodayIsoDate() },
-                                                notes = if (loanNotes.isNotBlank()) "$desc - $loanNotes" else desc
+                                                notes = if (loanNotes.isNotBlank()) "$desc - $loanNotes" else desc,
+                                                accountId = loanAccountId
                                             )
                                             onSubmit(newTx, null, 0.0, null, 0.0, null, 0.0, loanAccountId)
                                             onClose()

@@ -31,6 +31,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.saleemkhan.myshopmanager.data.accounting.AccountingEngine
 import com.saleemkhan.myshopmanager.model.*
 import com.saleemkhan.myshopmanager.ui.theme.*
 import com.saleemkhan.myshopmanager.utils.*
@@ -807,26 +808,28 @@ fun BalanceSheetReportView(
     isUrdu: Boolean,
     searchQuery: String
 ) {
+    val bs = remember(state) { AccountingEngine.calculateBalanceSheet(state) }
+
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         // KPI Summary
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             ReportKpiCard(
                 title = if (isUrdu) "مجموعی اثاثہ جات" else "Total Assets",
-                value = summary.totalAssets,
+                value = bs.totalAssets,
                 color = DukanGreenHover,
                 icon = Icons.Default.AccountBalance,
                 modifier = Modifier.weight(1f)
             )
             ReportKpiCard(
                 title = if (isUrdu) "مجموعی واجبات" else "Total Liabilities",
-                value = summary.totalLiabilities,
+                value = bs.totalLiabilities,
                 color = RedDanger,
                 icon = Icons.Default.MoneyOff,
                 modifier = Modifier.weight(1f)
             )
             ReportKpiCard(
                 title = if (isUrdu) "خالص مالیت (Capital)" else "Net Capital / Worth",
-                value = summary.netWorth,
+                value = bs.totalEquity,
                 color = BlueInfo,
                 icon = Icons.Default.TrendingUp,
                 modifier = Modifier.weight(1f)
@@ -852,31 +855,25 @@ fun BalanceSheetReportView(
                 ReportDetailRow(
                     label = if (isUrdu) "نقدی کیش و بینک بیلنس" else "Cash & Bank Balance",
                     subtext = "${state.bankAccounts.size} accounts",
-                    amount = summary.cashAndBank,
+                    amount = bs.cashAndBank,
                     amountColor = Slate800
                 )
                 ReportDetailRow(
-                    label = if (isUrdu) "اسٹاک کی مالیت (Inventory)" else "Closing Inventory Value",
+                    label = if (isUrdu) "اسٹاک کی مالیت (Inventory at AVCO)" else "Closing Inventory Value (AVCO)",
                     subtext = "${state.inventory.size} items",
-                    amount = summary.closingStockValue,
+                    amount = bs.inventoryValue,
                     amountColor = Slate800
                 )
                 ReportDetailRow(
                     label = if (isUrdu) "کسٹمرز سے وصول طلب ادھار (Receivables)" else "Customer Receivables (Debtors)",
-                    subtext = "${state.customers.count { it.totalCredit > 0 }} active debtors",
-                    amount = summary.totalReceivables,
+                    subtext = "${state.customers.count { it.totalCredit > 0 }} debtors",
+                    amount = bs.customerReceivables,
                     amountColor = AmberWarning
                 )
                 ReportDetailRow(
                     label = if (isUrdu) "دکان کے فکسڈ اثاثے (فرنیچر، مشینری)" else "Shop Fixed Assets",
                     subtext = "${state.businessAssets.size} assets registered",
-                    amount = summary.totalBusinessAssets - summary.cashAndBank - summary.closingStockValue - summary.totalReceivables,
-                    amountColor = Slate800
-                )
-                ReportDetailRow(
-                    label = if (isUrdu) "ذاتی اثاثہ جات (Personal Assets)" else "Personal Assets",
-                    subtext = "${state.personalAssets.size} assets",
-                    amount = state.personalAssets.sumOf { it.value },
+                    amount = bs.businessFixedAssets,
                     amountColor = Slate800
                 )
 
@@ -884,7 +881,7 @@ fun BalanceSheetReportView(
                 ReportDetailRow(
                     label = if (isUrdu) "کل اثاثے (Total Assets)" else "Total Assets",
                     subtext = null,
-                    amount = summary.totalAssets,
+                    amount = bs.totalAssets,
                     amountColor = DukanGreenHover,
                     isBold = true,
                     isHighlight = true
@@ -910,14 +907,14 @@ fun BalanceSheetReportView(
 
                 ReportDetailRow(
                     label = if (isUrdu) "سپلائرز کے واجب الادا بل (Payables)" else "Supplier Payables (Creditors)",
-                    subtext = "${state.suppliers.count { it.totalPayable > 0 }} active creditors",
-                    amount = summary.totalSupplierPayables,
+                    subtext = "${state.suppliers.count { it.totalPayable > 0 }} creditors",
+                    amount = bs.supplierPayables,
                     amountColor = RedDanger
                 )
                 ReportDetailRow(
                     label = if (isUrdu) "واجب الادا قرضے (Loans Payable)" else "Outstanding Loans",
                     subtext = "${state.loans.size} loan accounts",
-                    amount = summary.totalLoans,
+                    amount = bs.loansPayable,
                     amountColor = RedDanger
                 )
 
@@ -925,7 +922,7 @@ fun BalanceSheetReportView(
                 ReportDetailRow(
                     label = if (isUrdu) "کل واجبات (Total Liabilities)" else "Total Liabilities",
                     subtext = null,
-                    amount = summary.totalLiabilities,
+                    amount = bs.totalLiabilities,
                     amountColor = RedDanger,
                     isBold = true,
                     isHighlight = true
@@ -933,7 +930,7 @@ fun BalanceSheetReportView(
             }
         }
 
-        // Net Worth Card
+        // Net Worth / Equity Card (Satisfying A = L + E)
         Card(
             shape = RoundedCornerShape(14.dp),
             colors = CardDefaults.cardColors(containerColor = Color(0xFFF0FDF4)),
@@ -949,19 +946,19 @@ fun BalanceSheetReportView(
             ) {
                 Column {
                     Text(
-                        text = if (isUrdu) "خالص مالیت / کیپیٹل (Owner's Net Worth)" else "Owner's Net Worth (Capital)",
+                        text = if (isUrdu) "خالص کاروباری مالیت / ایکویٹی (Owner's Equity)" else "Owner's Equity (Capital)",
                         fontWeight = FontWeight.Bold,
                         fontSize = 13.sp,
                         color = DukanGreenHover
                     )
                     Text(
-                        text = if (isUrdu) "کل اثاثے منہا کل واجبات" else "Total Assets - Total Liabilities",
+                        text = if (isUrdu) "کل اثاثے منہا کل واجبات (A = L + E)" else "Total Assets - Total Liabilities (A = L + E)",
                         fontSize = 11.sp,
                         color = Slate600
                     )
                 }
                 Text(
-                    text = FormatUtils.formatCurrency(summary.netWorth),
+                    text = FormatUtils.formatCurrency(bs.totalEquity),
                     fontWeight = FontWeight.ExtraBold,
                     fontSize = 16.sp,
                     color = DukanGreenHover
@@ -1366,19 +1363,19 @@ fun CogsReportView(
     searchQuery: String,
     isUrdu: Boolean
 ) {
-    val periodPurchases = filteredTransactions.filter { it.type == TransactionType.PURCHASE }.sumOf { it.amount }
+    val cogsResult = remember(filteredTransactions) {
+        AccountingEngine.calculatePeriodCogs(filteredTransactions)
+    }
     val periodSales = filteredTransactions.filter { it.type == TransactionType.SALE }.sumOf { it.amount }
-    val openingStock = summary.openingStockValue
-    val closingStock = summary.closingStockValue
-    val cogs = openingStock + periodPurchases - closingStock
-    val grossProfit = periodSales - cogs
+    val verifiedCogs = cogsResult.verifiedCogs
+    val grossProfit = periodSales - verifiedCogs
     val grossMarginPct = if (periodSales > 0) (grossProfit / periodSales) * 100 else 0.0
 
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             ReportKpiCard(
-                title = if (isUrdu) "بیچے گئے مال کی لاگت" else "Cost of Goods (COGS)",
-                value = cogs,
+                title = if (isUrdu) "بیچے گئے مال کی لاگت (AVCO)" else "Verified COGS (AVCO)",
+                value = verifiedCogs,
                 color = Slate800,
                 icon = Icons.Default.Inventory2,
                 modifier = Modifier.weight(1f)
@@ -1400,6 +1397,30 @@ fun CogsReportView(
             )
         }
 
+        if (cogsResult.unverifiedSalesCount > 0) {
+            Card(
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = AmberWarning.copy(alpha = 0.1f)),
+                border = BorderStroke(1.dp, AmberWarning.copy(alpha = 0.3f)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(Icons.Default.Warning, contentDescription = "Alert", tint = AmberWarning, modifier = Modifier.size(18.dp))
+                    Text(
+                        text = if (isUrdu) "نوٹ: ${cogsResult.unverifiedSalesCount} فروخت کے اندراجات کی تاریخی لاگت معلوم نہیں ہے۔"
+                        else "Notice: ${cogsResult.unverifiedSalesCount} sales transaction(s) have unverified/missing historical unit cost.",
+                        fontSize = 11.sp,
+                        color = Slate800,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            }
+        }
+
         Card(
             shape = RoundedCornerShape(14.dp),
             colors = CardDefaults.cardColors(containerColor = Color.White),
@@ -1408,7 +1429,7 @@ fun CogsReportView(
         ) {
             Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    text = if (isUrdu) "اسٹاک لاگت کا گوشوارہ (COGS Accounting Statement)" else "COGS Financial Calculation",
+                    text = if (isUrdu) "اسٹاک لاگت کا گوشوارہ (Perpetual AVCO Costing)" else "Perpetual AVCO Cost Calculation",
                     fontWeight = FontWeight.Bold,
                     fontSize = 13.sp,
                     color = Slate900
@@ -1416,52 +1437,27 @@ fun CogsReportView(
                 Divider(color = Slate100)
 
                 ReportDetailRow(
-                    label = if (isUrdu) "(+) شروع کا اسٹاک (Opening Stock)" else "(+) Opening Inventory Value",
-                    subtext = null,
-                    amount = openingStock,
-                    amountColor = Slate800
-                )
-                ReportDetailRow(
-                    label = if (isUrdu) "(+) اس مدت کی خریداری (Purchases)" else "(+) Purchases During Period",
-                    subtext = null,
-                    amount = periodPurchases,
-                    amountColor = Slate800
-                )
-                ReportDetailRow(
-                    label = if (isUrdu) "(=) فروخت کے لیے دستیاب مال (Available for Sale)" else "(=) Goods Available for Sale",
-                    subtext = null,
-                    amount = openingStock + periodPurchases,
-                    amountColor = BlueInfo,
-                    isBold = true
-                )
-                ReportDetailRow(
-                    label = if (isUrdu) "(-) اختتامی اسٹاک (Closing Stock)" else "(-) Closing Inventory Value",
-                    subtext = null,
-                    amount = closingStock,
-                    amountColor = RedDanger
-                )
-
-                Divider(color = Slate200)
-                ReportDetailRow(
-                    label = if (isUrdu) "(=) کل بیچے گئے مال کی لاگت (COGS)" else "(=) Cost of Goods Sold (COGS)",
-                    subtext = null,
-                    amount = cogs,
-                    amountColor = Slate900,
-                    isBold = true,
-                    isHighlight = true
-                )
-                ReportDetailRow(
                     label = if (isUrdu) "مجموعی فروخت (Total Revenue)" else "Total Sales Revenue",
-                    subtext = null,
+                    subtext = "${filteredTransactions.count { it.type == TransactionType.SALE }} sales",
                     amount = periodSales,
                     amountColor = DukanGreenHover
                 )
                 ReportDetailRow(
+                    label = if (isUrdu) "تصدیق شدہ بیچے گئے مال کی لاگت (Verified COGS)" else "Verified COGS (AVCO Costing)",
+                    subtext = "${cogsResult.verifiedCount} verified sales",
+                    amount = verifiedCogs,
+                    amountColor = Slate800,
+                    isBold = true
+                )
+
+                Divider(color = Slate200)
+                ReportDetailRow(
                     label = if (isUrdu) "خام منافع (Gross Profit)" else "Gross Profit",
                     subtext = "Margin: ${String.format(Locale.US, "%.1f", grossMarginPct)}%",
                     amount = grossProfit,
-                    amountColor = DukanGreenHover,
-                    isBold = true
+                    amountColor = if (grossProfit >= 0) DukanGreenHover else RedDanger,
+                    isBold = true,
+                    isHighlight = true
                 )
             }
         }
@@ -1478,11 +1474,13 @@ fun NetProfitReportView(
     filteredTransactions: List<Transaction>,
     isUrdu: Boolean
 ) {
-    val sales = filteredTransactions.filter { it.type == TransactionType.SALE }.sumOf { it.amount }
-    val purchases = filteredTransactions.filter { it.type == TransactionType.PURCHASE }.sumOf { it.amount }
-    val directExpenses = filteredTransactions.filter { it.type == TransactionType.EXPENSE }.sumOf { it.amount }
-    val cogs = summary.rawCogs
-    val grossProfit = sales - cogs
+    val profitResult = remember(filteredTransactions) {
+        AccountingEngine.calculatePeriodProfit(filteredTransactions)
+    }
+    val sales = profitResult.netRevenue
+    val verifiedCogs = profitResult.verifiedCogs
+    val grossProfit = profitResult.grossProfit
+    val directExpenses = profitResult.operatingExpenses
     val otherIncomeTotal = state.otherIncome.let {
         it.rentalIncome + it.bankProfit + it.agriculturalIncome + it.capitalGain + it.freelanceIncome + it.otherIncome
     }
@@ -1509,7 +1507,7 @@ fun NetProfitReportView(
             ReportKpiCard(
                 title = if (isUrdu) "خالص منافع (Net)" else "Net Business Profit",
                 value = netProfit,
-                color = GreenSuccess,
+                color = if (netProfit >= 0) GreenSuccess else RedDanger,
                 icon = Icons.Default.TrendingUp,
                 modifier = Modifier.weight(1f)
             )
@@ -1531,8 +1529,8 @@ fun NetProfitReportView(
                 Divider(color = Slate100)
 
                 ReportDetailRow(if (isUrdu) "1. مجموعی آمدن / فروخت (Sales Revenue)" else "1. Gross Revenue from Sales", null, sales, DukanGreenHover)
-                ReportDetailRow(if (isUrdu) "2. مال کی لاگت (Cost of Goods Sold - COGS)" else "2. Cost of Goods Sold (COGS)", null, cogs, Slate700)
-                ReportDetailRow(if (isUrdu) "3. مجموعی منافع (Gross Profit)" else "3. Gross Profit", null, grossProfit, DukanGreenHover, isBold = true)
+                ReportDetailRow(if (isUrdu) "2. بیچے گئے مال کی لاگت (Verified COGS)" else "2. Cost of Goods Sold (Verified COGS)", null, verifiedCogs, Slate700)
+                ReportDetailRow(if (isUrdu) "3. مجموعی منافع (Gross Profit)" else "3. Gross Profit", null, grossProfit, if (grossProfit >= 0) DukanGreenHover else RedDanger, isBold = true)
 
                 Divider(color = Slate100)
                 ReportDetailRow(if (isUrdu) "4. دکان کے آپریشنل اخراجات (Operating Expenses)" else "4. Operating Overheads & Expenses", null, directExpenses, RedDanger)
@@ -1987,33 +1985,25 @@ fun CashFlowReportView(
     searchQuery: String,
     isUrdu: Boolean
 ) {
-    val inflows = filteredTransactions.filter {
-        it.type == TransactionType.SALE ||
-        it.type == TransactionType.RECEIPT ||
-        it.type == TransactionType.LOAN_TAKEN
-    }.sumOf { it.amount }
-
-    val outflows = filteredTransactions.filter {
-        it.type == TransactionType.PURCHASE ||
-        it.type == TransactionType.EXPENSE ||
-        it.type == TransactionType.PAYMENT ||
-        it.type == TransactionType.LOAN_GIVEN
-    }.sumOf { it.amount }
-
-    val netCashFlow = inflows - outflows
+    val cashFlowResult = remember(filteredTransactions) {
+        AccountingEngine.calculateCashFlow(filteredTransactions)
+    }
+    val inflows = cashFlowResult.cashInflow
+    val outflows = cashFlowResult.cashOutflow
+    val netCashFlow = cashFlowResult.netCashFlow
     val totalCashAndBank = state.bankAccounts.sumOf { it.balance }
 
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             ReportKpiCard(
-                title = if (isUrdu) "کل آمد (Inflow)" else "Cash Inflows",
+                title = if (isUrdu) "کل کیش آمد (Inflow)" else "Cash Inflows",
                 value = inflows,
                 color = GreenSuccess,
                 icon = Icons.Default.ArrowDownward,
                 modifier = Modifier.weight(1f)
             )
             ReportKpiCard(
-                title = if (isUrdu) "کل اخراج (Outflow)" else "Cash Outflows",
+                title = if (isUrdu) "کل کیش اخراج (Outflow)" else "Cash Outflows",
                 value = outflows,
                 color = RedDanger,
                 icon = Icons.Default.ArrowUpward,
@@ -2232,9 +2222,10 @@ fun generateReportShareSummary(
 
     when (reportType) {
         ReportType.BALANCE_SHEET -> {
-            sb.appendLine("${if (isUrdu) "کل اثاثہ جات:" else "Total Assets:"} ${FormatUtils.formatCurrency(fbrSummary.totalAssets)}")
-            sb.appendLine("${if (isUrdu) "کل واجبات:" else "Total Liabilities:"} ${FormatUtils.formatCurrency(fbrSummary.totalLiabilities)}")
-            sb.appendLine("${if (isUrdu) "خالص مالیت / کیپیٹل:" else "Net Capital:"} ${FormatUtils.formatCurrency(fbrSummary.netWorth)}")
+            val bs = AccountingEngine.calculateBalanceSheet(state)
+            sb.appendLine("${if (isUrdu) "کل کاروباری اثاثہ جات:" else "Total Business Assets:"} ${FormatUtils.formatCurrency(bs.totalAssets)}")
+            sb.appendLine("${if (isUrdu) "کل واجبات:" else "Total Liabilities:"} ${FormatUtils.formatCurrency(bs.totalLiabilities)}")
+            sb.appendLine("${if (isUrdu) "خالص مالیت / ایکویٹی:" else "Total Equity:"} ${FormatUtils.formatCurrency(bs.totalEquity)}")
         }
         ReportType.SALES -> {
             val totalSales = filteredTx.filter { it.type == TransactionType.SALE }.sumOf { it.amount }
@@ -2242,12 +2233,25 @@ fun generateReportShareSummary(
             sb.appendLine("${if (isUrdu) "کل بلز:" else "Total Invoices:"} ${filteredTx.size}")
         }
         ReportType.NET_PROFIT -> {
+            val profitResult = AccountingEngine.calculatePeriodProfit(filteredTx)
+            sb.appendLine("${if (isUrdu) "فروخت:" else "Sales Revenue:"} ${FormatUtils.formatCurrency(profitResult.netRevenue)}")
+            sb.appendLine("${if (isUrdu) "بیچے گئے مال کی لاگت (COGS):" else "Verified COGS:"} ${FormatUtils.formatCurrency(profitResult.verifiedCogs)}")
+            sb.appendLine("${if (isUrdu) "مجموعی منافع:" else "Gross Profit:"} ${FormatUtils.formatCurrency(profitResult.grossProfit)}")
+            sb.appendLine("${if (isUrdu) "اخراجات:" else "Operating Expenses:"} ${FormatUtils.formatCurrency(profitResult.operatingExpenses)}")
+            sb.appendLine("${if (isUrdu) "خالص منافع:" else "Net Profit:"} ${FormatUtils.formatCurrency(profitResult.netProfit)}")
+        }
+        ReportType.COGS -> {
+            val cogsRes = AccountingEngine.calculatePeriodCogs(filteredTx)
             val sales = filteredTx.filter { it.type == TransactionType.SALE }.sumOf { it.amount }
-            val expenses = filteredTx.filter { it.type == TransactionType.EXPENSE }.sumOf { it.amount }
-            val net = sales - fbrSummary.rawCogs - expenses
             sb.appendLine("${if (isUrdu) "فروخت:" else "Sales Revenue:"} ${FormatUtils.formatCurrency(sales)}")
-            sb.appendLine("${if (isUrdu) "اخراجات:" else "Operating Expenses:"} ${FormatUtils.formatCurrency(expenses)}")
-            sb.appendLine("${if (isUrdu) "خالص منافع:" else "Net Profit:"} ${FormatUtils.formatCurrency(net)}")
+            sb.appendLine("${if (isUrdu) "بیچے گئے مال کی لاگت (COGS):" else "Verified COGS:"} ${FormatUtils.formatCurrency(cogsRes.verifiedCogs)}")
+            sb.appendLine("${if (isUrdu) "مجموعی منافع:" else "Gross Profit:"} ${FormatUtils.formatCurrency(sales - cogsRes.verifiedCogs)}")
+        }
+        ReportType.CASH_FLOW -> {
+            val cf = AccountingEngine.calculateCashFlow(filteredTx)
+            sb.appendLine("${if (isUrdu) "کیش آمد (Inflow):" else "Cash Inflow:"} ${FormatUtils.formatCurrency(cf.cashInflow)}")
+            sb.appendLine("${if (isUrdu) "کیش اخراج (Outflow):" else "Cash Outflow:"} ${FormatUtils.formatCurrency(cf.cashOutflow)}")
+            sb.appendLine("${if (isUrdu) "خالص کیش فلو:" else "Net Cash Flow:"} ${FormatUtils.formatCurrency(cf.netCashFlow)}")
         }
         ReportType.CUSTOMER_LEDGER -> {
             val totalUdhaar = state.customers.sumOf { it.totalCredit }

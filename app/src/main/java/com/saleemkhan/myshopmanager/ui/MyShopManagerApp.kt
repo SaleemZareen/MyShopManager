@@ -8,6 +8,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import com.saleemkhan.myshopmanager.data.AppStateRepository
+import com.saleemkhan.myshopmanager.data.accounting.AccountingEngine
 import com.saleemkhan.myshopmanager.model.*
 import com.saleemkhan.myshopmanager.ui.components.*
 import com.saleemkhan.myshopmanager.ui.screens.*
@@ -279,114 +280,14 @@ fun MyShopManagerApp() {
                                             }
                                         }
 
-                                        // Perform soft delete: Move from transactions to deletedTransactions
                                         repository.updateState { current ->
-                                            val remainingTx = current.transactions.filter { it.id != id }
-                                            val newDeleted = (listOf(targetTx) + current.deletedTransactions).distinctBy { it.id }
-
-                                            // Revert inventory stock if applicable
-                                            val updatedInventory = if (!targetTx.itemId.isNullOrBlank()) {
-                                                current.inventory.map { item ->
-                                                    if (item.id == targetTx.itemId) {
-                                                        when (targetTx.type) {
-                                                            TransactionType.SALE -> item.copy(quantity = item.quantity + (targetTx.qtyChange ?: 0.0))
-                                                            TransactionType.PURCHASE -> item.copy(quantity = (item.quantity - (targetTx.qtyChange ?: 0.0)).coerceAtLeast(0.0))
-                                                            else -> item
-                                                        }
-                                                    } else item
-                                                }
-                                            } else current.inventory
-
-                                            // Revert party balances if applicable
-                                            val updatedCustomers = if (!targetTx.partyName.isNullOrBlank()) {
-                                                current.customers.map { c ->
-                                                    if (c.name.equals(targetTx.partyName, ignoreCase = true)) {
-                                                        when (targetTx.type) {
-                                                            TransactionType.RECEIPT -> c.copy(totalCredit = c.totalCredit + targetTx.amount)
-                                                            TransactionType.SALE -> if (targetTx.paymentMethod == PaymentMethod.CREDIT) {
-                                                                c.copy(totalCredit = (c.totalCredit - targetTx.amount).coerceAtLeast(0.0))
-                                                            } else c
-                                                            else -> c
-                                                        }
-                                                    } else c
-                                                }
-                                            } else current.customers
-
-                                            val updatedSuppliers = if (!targetTx.partyName.isNullOrBlank()) {
-                                                current.suppliers.map { s ->
-                                                    if (s.name.equals(targetTx.partyName, ignoreCase = true)) {
-                                                        when (targetTx.type) {
-                                                            TransactionType.PAYMENT -> s.copy(totalPayable = s.totalPayable + targetTx.amount)
-                                                            TransactionType.PURCHASE -> s.copy(totalPayable = (s.totalPayable - targetTx.amount).coerceAtLeast(0.0))
-                                                            else -> s
-                                                        }
-                                                    } else s
-                                                }
-                                            } else current.suppliers
-
-                                            current.copy(
-                                                transactions = remainingTx,
-                                                deletedTransactions = newDeleted,
-                                                inventory = updatedInventory,
-                                                customers = updatedCustomers,
-                                                suppliers = updatedSuppliers
-                                            )
+                                            AccountingEngine.deleteTransaction(current, id)
                                         }
                                         true
                                     },
                                     onRestoreTransaction = { id ->
-                                        val targetTx = appState.deletedTransactions.find { it.id == id } ?: return@TransactionsScreen
                                         repository.updateState { current ->
-                                            val remainingDeleted = current.deletedTransactions.filter { it.id != id }
-                                            val restoredTxList = listOf(targetTx) + current.transactions
-
-                                            // Re-apply inventory stock
-                                            val updatedInventory = if (!targetTx.itemId.isNullOrBlank()) {
-                                                current.inventory.map { item ->
-                                                    if (item.id == targetTx.itemId) {
-                                                        when (targetTx.type) {
-                                                            TransactionType.SALE -> item.copy(quantity = (item.quantity - (targetTx.qtyChange ?: 0.0)).coerceAtLeast(0.0))
-                                                            TransactionType.PURCHASE -> item.copy(quantity = item.quantity + (targetTx.qtyChange ?: 0.0))
-                                                            else -> item
-                                                        }
-                                                    } else item
-                                                }
-                                            } else current.inventory
-
-                                            // Re-apply party balances
-                                            val updatedCustomers = if (!targetTx.partyName.isNullOrBlank()) {
-                                                current.customers.map { c ->
-                                                    if (c.name.equals(targetTx.partyName, ignoreCase = true)) {
-                                                        when (targetTx.type) {
-                                                            TransactionType.RECEIPT -> c.copy(totalCredit = (c.totalCredit - targetTx.amount).coerceAtLeast(0.0))
-                                                            TransactionType.SALE -> if (targetTx.paymentMethod == PaymentMethod.CREDIT) {
-                                                                c.copy(totalCredit = c.totalCredit + targetTx.amount)
-                                                            } else c
-                                                            else -> c
-                                                        }
-                                                    } else c
-                                                }
-                                            } else current.customers
-
-                                            val updatedSuppliers = if (!targetTx.partyName.isNullOrBlank()) {
-                                                current.suppliers.map { s ->
-                                                    if (s.name.equals(targetTx.partyName, ignoreCase = true)) {
-                                                        when (targetTx.type) {
-                                                            TransactionType.PAYMENT -> s.copy(totalPayable = (s.totalPayable - targetTx.amount).coerceAtLeast(0.0))
-                                                            TransactionType.PURCHASE -> s.copy(totalPayable = s.totalPayable + targetTx.amount)
-                                                            else -> s
-                                                        }
-                                                    } else s
-                                                }
-                                            } else current.suppliers
-
-                                            current.copy(
-                                                transactions = restoredTxList,
-                                                deletedTransactions = remainingDeleted,
-                                                inventory = updatedInventory,
-                                                customers = updatedCustomers,
-                                                suppliers = updatedSuppliers
-                                            )
+                                            AccountingEngine.restoreTransaction(current, id)
                                         }
                                     },
                                     onUpdateTransaction = { id, partialData ->
@@ -419,6 +320,9 @@ fun MyShopManagerApp() {
                                         repository.updateState { it.copy(suppliers = it.suppliers + sup) }
                                     },
                                     onRecordPayment = { txType, partyName, amt ->
+                                        val matchingCust = appState.customers.find { it.name.equals(partyName, true) }
+                                        val matchingSupp = appState.suppliers.find { it.name.equals(partyName, true) }
+                                        val partyId = if (txType == TransactionType.RECEIPT) matchingCust?.id else matchingSupp?.id
                                         val newTx = Transaction(
                                             id = "tx_${System.currentTimeMillis()}",
                                             type = txType,
@@ -426,17 +330,11 @@ fun MyShopManagerApp() {
                                             category = if (txType == TransactionType.RECEIPT) "Customer Udhaar" else "Supplier Payment",
                                             paymentMethod = PaymentMethod.CASH,
                                             partyName = partyName,
+                                            partyId = partyId,
                                             date = FormatUtils.getTodayIsoDate()
                                         )
                                         repository.updateState { current ->
-                                            val updatedTx = listOf(newTx) + current.transactions
-                                            val updatedCust = if (txType == TransactionType.RECEIPT) {
-                                                current.customers.map { c -> if (c.name.equals(partyName, true)) c.copy(totalCredit = (c.totalCredit - amt).coerceAtLeast(0.0)) else c }
-                                            } else current.customers
-                                            val updatedSup = if (txType == TransactionType.PAYMENT) {
-                                                current.suppliers.map { s -> if (s.name.equals(partyName, true)) s.copy(totalPayable = (s.totalPayable - amt).coerceAtLeast(0.0)) else s }
-                                            } else current.suppliers
-                                            current.copy(transactions = updatedTx, customers = updatedCust, suppliers = updatedSup)
+                                            AccountingEngine.applyTransaction(current, newTx)
                                         }
                                     },
                                     onToggleArchiveCustomer = { cust ->
@@ -470,6 +368,22 @@ fun MyShopManagerApp() {
                                     onSaleItem = { item, qty, unitPrice, discount, netAmount, customer, newCustomerName, newCustomerPhone, paymentMethod, accountId, notes ->
                                         repository.updateState { current ->
                                             val party = customer?.name ?: newCustomerName ?: (if (isUrdu) "کاؤنٹر نقد کسٹمر" else "Counter Cash Customer")
+                                            var updatedCustomers = current.customers
+                                            var targetPartyId = customer?.id
+
+                                            if (newCustomerName != null && newCustomerName.isNotBlank()) {
+                                                val newCust = CustomerParty(
+                                                    id = "cust_${System.currentTimeMillis()}",
+                                                    name = newCustomerName,
+                                                    phone = newCustomerPhone ?: "",
+                                                    totalCredit = 0.0,
+                                                    openingBalance = 0.0,
+                                                    lastTransactionDate = FormatUtils.getTodayIsoDate()
+                                                )
+                                                updatedCustomers = updatedCustomers + newCust
+                                                targetPartyId = newCust.id
+                                            }
+
                                             val newTx = Transaction(
                                                 id = "tx_${System.currentTimeMillis()}",
                                                 type = TransactionType.SALE,
@@ -477,41 +391,18 @@ fun MyShopManagerApp() {
                                                 category = item.category,
                                                 paymentMethod = paymentMethod,
                                                 partyName = party,
+                                                partyId = targetPartyId,
                                                 date = FormatUtils.getTodayIsoDate(),
                                                 notes = notes ?: "Sale ${item.name} x $qty",
-                                                itemId = item.id
+                                                itemId = item.id,
+                                                qtyChange = qty,
+                                                unitCost = item.purchasePrice,
+                                                totalValueChange = qty * item.purchasePrice,
+                                                accountId = accountId
                                             )
-                                            val updatedTxList = listOf(newTx) + current.transactions
-                                            val updatedInv = current.inventory.map {
-                                                if (it.id == item.id) it.copy(quantity = (it.quantity - qty).coerceAtLeast(0.0)) else it
-                                            }
-                                            var updatedCustomers = current.customers
-                                            if (newCustomerName != null && newCustomerName.isNotBlank()) {
-                                                val newCust = CustomerParty(
-                                                    id = "cust_${System.currentTimeMillis()}",
-                                                    name = newCustomerName,
-                                                    phone = newCustomerPhone ?: "",
-                                                    totalCredit = if (paymentMethod == PaymentMethod.CREDIT) netAmount else 0.0,
-                                                    lastTransactionDate = FormatUtils.getTodayIsoDate()
-                                                )
-                                                updatedCustomers = updatedCustomers + newCust
-                                            } else if (customer != null && paymentMethod == PaymentMethod.CREDIT) {
-                                                updatedCustomers = updatedCustomers.map {
-                                                    if (it.id == customer.id) it.copy(totalCredit = it.totalCredit + netAmount) else it
-                                                }
-                                            }
-                                            val updatedAccounts = if (accountId != null && paymentMethod != PaymentMethod.CREDIT) {
-                                                current.bankAccounts.map { acc ->
-                                                    if (acc.id == accountId) acc.copy(balance = acc.balance + netAmount) else acc
-                                                }
-                                            } else current.bankAccounts
 
-                                            current.copy(
-                                                transactions = updatedTxList,
-                                                inventory = updatedInv,
-                                                customers = updatedCustomers,
-                                                bankAccounts = updatedAccounts
-                                            )
+                                            val baseState = current.copy(customers = updatedCustomers)
+                                            AccountingEngine.applyTransaction(baseState, newTx)
                                         }
                                     }
                                 )
@@ -546,27 +437,7 @@ fun MyShopManagerApp() {
                                     },
                                     onAddTransaction = { newTx ->
                                         repository.updateState { current ->
-                                            val isIncoming = newTx.type == TransactionType.LOAN_TAKEN
-                                            val isOutgoing = newTx.type == TransactionType.PAYMENT
-                                            val updatedAccounts = current.bankAccounts.map { acc ->
-                                                val matches = when (newTx.paymentMethod) {
-                                                    PaymentMethod.CASH -> acc.type.equals("CASH", ignoreCase = true)
-                                                    PaymentMethod.BANK -> acc.type.equals("BANK", ignoreCase = true)
-                                                    PaymentMethod.EASYPAISA -> acc.bankName.contains("EASY", ignoreCase = true) || acc.accountTitle.contains("Easy", ignoreCase = true)
-                                                    PaymentMethod.JAZZCASH -> acc.bankName.contains("JAZZ", ignoreCase = true) || acc.accountTitle.contains("Jazz", ignoreCase = true)
-                                                    PaymentMethod.SADAPAY -> acc.bankName.contains("SADA", ignoreCase = true) || acc.accountTitle.contains("Sada", ignoreCase = true)
-                                                    else -> acc.type.equals("CASH", ignoreCase = true)
-                                                }
-                                                if (matches) {
-                                                    if (isIncoming) acc.copy(balance = acc.balance + newTx.amount)
-                                                    else if (isOutgoing) acc.copy(balance = (acc.balance - newTx.amount).coerceAtLeast(0.0))
-                                                    else acc
-                                                } else acc
-                                            }
-                                            current.copy(
-                                                transactions = listOf(newTx) + current.transactions,
-                                                bankAccounts = updatedAccounts
-                                            )
+                                            AccountingEngine.applyTransaction(current, newTx)
                                         }
                                     }
                                 )
@@ -650,90 +521,54 @@ fun MyShopManagerApp() {
                                 },
                                 onSubmit = { newTx, itemId, qtyChange, custId, custBalChange, suppId, suppBalChange, targetAccId ->
                                     repository.updateState { current ->
-                                        val updatedTxList = if (editingTransaction != null) {
-                                            current.transactions.map { if (it.id == editingTransaction!!.id) newTx.copy(id = editingTransaction!!.id) else it }
-                                        } else {
-                                            listOf(newTx) + current.transactions
-                                        }
-
-                                        // 1. Stock update
-                                        val updatedInv = if (itemId != null && qtyChange != 0.0) {
-                                            current.inventory.map { item ->
-                                                if (item.id == itemId) item.copy(quantity = (item.quantity + qtyChange).coerceAtLeast(0.0)) else item
-                                            }
-                                        } else current.inventory
-
-                                        // 2. Customer balance update
-                                        val updatedCustomers = if (custId != null && custBalChange != 0.0) {
-                                            current.customers.map { cust ->
-                                                if (cust.id == custId) cust.copy(totalCredit = (cust.totalCredit + custBalChange).coerceAtLeast(0.0)) else cust
-                                            }
-                                        } else current.customers
-
-                                        // 3. Supplier balance update
-                                        val updatedSuppliers = if (suppId != null && suppBalChange != 0.0) {
-                                            current.suppliers.map { supp ->
-                                                if (supp.id == suppId) supp.copy(totalPayable = (supp.totalPayable + suppBalChange).coerceAtLeast(0.0)) else supp
-                                            }
-                                        } else current.suppliers
-
-                                        // 4. Bank / Cash Accounts balance update
-                                        val updatedAccounts = if (targetAccId != null) {
-                                            current.bankAccounts.map { acc ->
-                                                if (acc.id == targetAccId) {
-                                                    when (newTx.type) {
-                                                        TransactionType.SALE, TransactionType.RECEIPT -> acc.copy(balance = acc.balance + newTx.amount)
-                                                        TransactionType.PURCHASE, TransactionType.EXPENSE, TransactionType.PAYMENT -> acc.copy(balance = acc.balance - newTx.amount)
-                                                        else -> acc
-                                                    }
-                                                } else acc
-                                            }
-                                        } else current.bankAccounts
-
-                                        current.copy(
-                                            transactions = updatedTxList,
-                                            inventory = updatedInv,
-                                            customers = updatedCustomers,
-                                            suppliers = updatedSuppliers,
-                                            bankAccounts = updatedAccounts
+                                        val finalTx = newTx.copy(
+                                            itemId = newTx.itemId ?: itemId,
+                                            qtyChange = newTx.qtyChange ?: (if (qtyChange != 0.0) kotlin.math.abs(qtyChange) else null),
+                                            partyId = newTx.partyId ?: custId ?: suppId,
+                                            accountId = newTx.accountId ?: targetAccId
                                         )
+
+                                        if (editingTransaction != null) {
+                                            AccountingEngine.editTransaction(current, editingTransaction!!, finalTx)
+                                        } else {
+                                            AccountingEngine.applyTransaction(current, finalTx)
+                                        }
                                     }
                                     editingTransaction = null
                                 },
                                 onPosSaleSubmit = { newTx, cartDeductions, custId, custBalChange, targetAccId ->
                                     repository.updateState { current ->
-                                        val updatedTxList = if (editingTransaction != null) {
-                                            current.transactions.map { if (it.id == editingTransaction!!.id) newTx.copy(id = editingTransaction!!.id) else it }
-                                        } else {
-                                            listOf(newTx) + current.transactions
-                                        }
-
-                                        // Multi-item inventory reduction for POS cart
-                                        val updatedInv = current.inventory.map { item ->
-                                            val deduction = cartDeductions.find { it.first == item.id }?.second ?: 0.0
-                                            if (deduction > 0.0) item.copy(quantity = (item.quantity - deduction).coerceAtLeast(0.0)) else item
-                                        }
-
-                                        // Customer balance update
-                                        val updatedCustomers = if (custId != null && custBalChange != 0.0) {
-                                            current.customers.map { cust ->
-                                                if (cust.id == custId) cust.copy(totalCredit = (cust.totalCredit + custBalChange).coerceAtLeast(0.0)) else cust
-                                            }
-                                        } else current.customers
-
-                                        // Bank / Cash account update
-                                        val updatedAccounts = if (targetAccId != null) {
-                                            current.bankAccounts.map { acc ->
-                                                if (acc.id == targetAccId) acc.copy(balance = acc.balance + newTx.amount) else acc
-                                            }
-                                        } else current.bankAccounts
-
-                                        current.copy(
-                                            transactions = updatedTxList,
-                                            inventory = updatedInv,
-                                            customers = updatedCustomers,
-                                            bankAccounts = updatedAccounts
+                                        val finalTx = newTx.copy(
+                                            partyId = newTx.partyId ?: custId,
+                                            accountId = newTx.accountId ?: targetAccId
                                         )
+
+                                        if (editingTransaction != null) {
+                                            val stateAfterReverse = AccountingEngine.reverseTransaction(current, editingTransaction!!)
+                                            val updatedInv = stateAfterReverse.inventory.map { item ->
+                                                val deduction = cartDeductions.find { it.first == item.id }?.second ?: 0.0
+                                                if (deduction > 0.0) item.copy(
+                                                    quantity = AccountingEngine.roundQuantity(item.quantity - deduction),
+                                                    soldQty = AccountingEngine.roundQuantity(item.soldQty + deduction)
+                                                ) else item
+                                            }
+                                            val baseState = stateAfterReverse.copy(inventory = updatedInv)
+                                            val stateWithPosting = AccountingEngine.applyTransaction(baseState, finalTx.copy(itemId = null, qtyChange = null))
+                                            val updatedList = stateWithPosting.transactions.map { if (it.id == editingTransaction!!.id) finalTx else it }
+                                            stateWithPosting.copy(transactions = updatedList)
+                                        } else {
+                                            val updatedInv = current.inventory.map { item ->
+                                                val deduction = cartDeductions.find { it.first == item.id }?.second ?: 0.0
+                                                if (deduction > 0.0) item.copy(
+                                                    quantity = AccountingEngine.roundQuantity(item.quantity - deduction),
+                                                    soldQty = AccountingEngine.roundQuantity(item.soldQty + deduction)
+                                                ) else item
+                                            }
+                                            val baseState = current.copy(inventory = updatedInv)
+                                            val stateWithPosting = AccountingEngine.applyTransaction(baseState, finalTx.copy(itemId = null, qtyChange = null))
+                                            val updatedList = listOf(finalTx) + stateWithPosting.transactions.filter { it.id != finalTx.id }
+                                            stateWithPosting.copy(transactions = updatedList)
+                                        }
                                     }
                                     editingTransaction = null
                                 },
@@ -749,8 +584,7 @@ fun MyShopManagerApp() {
                                 onClose = { isVoiceEntryOpen = false },
                                 onSubmit = { newTx ->
                                     repository.updateState { current ->
-                                        val updatedTxList = listOf(newTx) + current.transactions
-                                        current.copy(transactions = updatedTxList)
+                                        AccountingEngine.applyTransaction(current, newTx)
                                     }
                                 },
                                 isUrdu = isUrdu
@@ -765,7 +599,6 @@ fun MyShopManagerApp() {
                                 inventory = appState.inventory,
                                 onItemScanned = { /* Displayed in scanner */ },
                                 onQuickSale = { item ->
-                                    val newQty = (item.quantity - 1.0).coerceAtLeast(0.0)
                                     val newTx = Transaction(
                                         id = "tx_${System.currentTimeMillis()}",
                                         type = TransactionType.SALE,
@@ -775,25 +608,16 @@ fun MyShopManagerApp() {
                                         partyName = if (isUrdu) "کاؤنٹر نقد فروخت" else "Counter Cash Sale",
                                         date = FormatUtils.getTodayIsoDate(),
                                         notes = "Barcode Sale: ${item.name}",
-                                        itemId = item.id
+                                        itemId = item.id,
+                                        qtyChange = 1.0,
+                                        unitCost = item.purchasePrice,
+                                        totalValueChange = item.purchasePrice
                                     )
                                     repository.updateState { current ->
-                                        val updatedInv = current.inventory.map {
-                                            if (it.id == item.id) it.copy(quantity = newQty) else it
-                                        }
-                                        val updatedTx = listOf(newTx) + current.transactions
-                                        val updatedAcc = current.bankAccounts.map { acc ->
-                                            if (acc.type == "CASH") acc.copy(balance = acc.balance + item.salePrice) else acc
-                                        }
-                                        current.copy(
-                                            inventory = updatedInv,
-                                            transactions = updatedTx,
-                                            bankAccounts = updatedAcc
-                                        )
+                                        AccountingEngine.applyTransaction(current, newTx)
                                     }
                                 },
                                 onQuickPurchase = { item ->
-                                    val newQty = item.quantity + 1.0
                                     val newTx = Transaction(
                                         id = "tx_${System.currentTimeMillis()}",
                                         type = TransactionType.PURCHASE,
@@ -803,21 +627,13 @@ fun MyShopManagerApp() {
                                         partyName = if (isUrdu) "اسٹاک خریداری" else "Inventory Restock",
                                         date = FormatUtils.getTodayIsoDate(),
                                         notes = "Barcode Purchase: ${item.name}",
-                                        itemId = item.id
+                                        itemId = item.id,
+                                        qtyChange = 1.0,
+                                        unitCost = item.purchasePrice,
+                                        totalValueChange = item.purchasePrice
                                     )
                                     repository.updateState { current ->
-                                        val updatedInv = current.inventory.map {
-                                            if (it.id == item.id) it.copy(quantity = newQty) else it
-                                        }
-                                        val updatedTx = listOf(newTx) + current.transactions
-                                        val updatedAcc = current.bankAccounts.map { acc ->
-                                            if (acc.type == "CASH") acc.copy(balance = acc.balance - item.purchasePrice) else acc
-                                        }
-                                        current.copy(
-                                            inventory = updatedInv,
-                                            transactions = updatedTx,
-                                            bankAccounts = updatedAcc
-                                        )
+                                        AccountingEngine.applyTransaction(current, newTx)
                                     }
                                 },
                                 onAddNewItemWithBarcode = { code ->
@@ -861,29 +677,14 @@ fun MyShopManagerApp() {
                                 },
                                 onAddTransaction = { newTx, targetAccId, amountDelta ->
                                     repository.updateState { current ->
-                                        val updatedAccounts = if (targetAccId != null) {
-                                            current.bankAccounts.map { acc ->
-                                                if (acc.id == targetAccId) acc.copy(balance = acc.balance + amountDelta) else acc
-                                            }
-                                        } else current.bankAccounts
-
-                                        current.copy(
-                                            transactions = listOf(newTx) + current.transactions,
-                                            bankAccounts = updatedAccounts
-                                        )
+                                        val finalTx = newTx.copy(accountId = targetAccId ?: newTx.accountId)
+                                        AccountingEngine.applyTransaction(current, finalTx)
                                     }
                                 },
                                 onTransferFunds = { fromId, toId, amt, notes ->
                                     repository.updateState { current ->
                                         val fromAcc = current.bankAccounts.find { it.id == fromId }
                                         val toAcc = current.bankAccounts.find { it.id == toId }
-                                        val updated = current.bankAccounts.map { acc ->
-                                            when (acc.id) {
-                                                fromId -> acc.copy(balance = acc.balance - amt)
-                                                toId -> acc.copy(balance = acc.balance + amt)
-                                                else -> acc
-                                            }
-                                        }
 
                                         val method = when (fromAcc?.type) {
                                             "BANK" -> PaymentMethod.BANK
@@ -907,13 +708,12 @@ fun MyShopManagerApp() {
                                             paymentMethod = method,
                                             partyName = "${fromAcc?.accountTitle ?: fromId} → ${toAcc?.accountTitle ?: toId}",
                                             date = FormatUtils.getTodayIsoDate(),
-                                            notes = notes.ifBlank { if (isUrdu) "رقم منتقلی (اندرونی فنڈ ٹرانسفر)" else "Internal Fund Transfer" }
+                                            notes = notes.ifBlank { if (isUrdu) "رقم منتقلی (اندرونی فنڈ ٹرانسفر)" else "Internal Fund Transfer" },
+                                            accountId = fromId,
+                                            toAccountId = toId
                                         )
 
-                                        current.copy(
-                                            bankAccounts = updated,
-                                            transactions = listOf(transferTx) + current.transactions
-                                        )
+                                        AccountingEngine.applyTransaction(current, transferTx)
                                     }
                                 },
                                 onAdjustBalance = { accId, newBal, diff, reason ->
@@ -945,6 +745,7 @@ fun MyShopManagerApp() {
                                             paymentMethod = method,
                                             partyName = targetAcc?.accountTitle ?: "Account Reconciliation",
                                             date = FormatUtils.getTodayIsoDate(),
+                                            accountId = targetAcc?.id,
                                             notes = reason.ifBlank {
                                                 if (isUrdu) "اکاؤنٹ بیلنس ایڈجسٹمنٹ (فرق: ${FormatUtils.formatCurrency(diff)})"
                                                 else "Reconciliation adjustment (Diff: ${FormatUtils.formatCurrency(diff)})"

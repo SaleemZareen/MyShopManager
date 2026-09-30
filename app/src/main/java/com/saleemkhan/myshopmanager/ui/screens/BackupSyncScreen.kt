@@ -38,6 +38,7 @@ import com.saleemkhan.myshopmanager.data.AppStateRepository
 import com.saleemkhan.myshopmanager.data.AutoSyncSettings
 import com.saleemkhan.myshopmanager.data.GoogleAuthManager
 import com.saleemkhan.myshopmanager.data.backup.*
+import com.saleemkhan.myshopmanager.data.firebase.*
 import com.saleemkhan.myshopmanager.model.AppState
 import com.saleemkhan.myshopmanager.ui.theme.*
 import kotlinx.coroutines.launch
@@ -54,6 +55,8 @@ fun BackupSyncScreen(
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     val authManager = remember { GoogleAuthManager.getInstance(context) }
+    val firebaseAuth = remember { FirebaseAuthManager.getInstance(context) }
+    val firebaseSession by firebaseAuth.userSession.collectAsState()
     val quotaManager = remember { AiQuotaManager.getInstance(context) }
     val backupManager = remember { BackupManager.getInstance() }
     val repository = remember { AppStateRepository.getInstance(context) }
@@ -65,7 +68,10 @@ fun BackupSyncScreen(
     // Backup & Restore states
     var isExporting by remember { mutableStateOf(false) }
     var isBackingUpDrive by remember { mutableStateOf(false) }
+    var isBackingUpFirebase by remember { mutableStateOf(false) }
     var isLoadingDriveList by remember { mutableStateOf(false) }
+    var isLoadingFirebaseCloudInfo by remember { mutableStateOf(false) }
+    var firebaseCloudBackupInfo by remember { mutableStateOf<CloudBackupInfo?>(null) }
     var isRestoring by remember { mutableStateOf(false) }
 
     var localBackupsList by remember { mutableStateOf<List<BackupFileInfo>>(emptyList()) }
@@ -83,17 +89,30 @@ fun BackupSyncScreen(
     var validationErrorMessage by remember { mutableStateOf<String?>(null) }
 
     // Google Sign-In Client
+    val fbConfig = remember { FirebaseConfig.get(context) }
     val gso = remember {
-        GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+        val builder = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
             .requestEmail()
             .requestProfile()
-            .build()
+        if (fbConfig.oAuthClientId.isNotBlank()) {
+            try {
+                builder.requestIdToken(fbConfig.oAuthClientId)
+            } catch (_: Exception) {}
+        }
+        builder.build()
     }
     val googleSignInClient = remember { GoogleSignIn.getClient(context, gso) }
 
     fun refreshLists() {
         coroutineScope.launch {
             localBackupsList = backupManager.listLocalBackups(context)
+            isLoadingFirebaseCloudInfo = true
+            val fbInfoRes = backupManager.getFirebaseCloudBackupInfo(context)
+            if (fbInfoRes.isSuccess) {
+                firebaseCloudBackupInfo = fbInfoRes.getOrNull()
+            }
+            isLoadingFirebaseCloudInfo = false
+
             if (profile.isLoggedIn) {
                 isLoadingDriveList = true
                 val driveRes = backupManager.listGoogleDriveBackups(context)
@@ -106,6 +125,7 @@ fun BackupSyncScreen(
     }
 
     LaunchedEffect(Unit) {
+        firebaseAuth.ensureAnonymousSession()
         refreshLists()
     }
 
@@ -135,12 +155,23 @@ fun BackupSyncScreen(
                 val task = GoogleSignIn.getSignedInAccountFromIntent(result.data)
                 val account = if (task.isSuccessful) task.result else null
                 val email = account?.email
+                val idToken = account?.idToken
                 if (!email.isNullOrBlank()) {
                     val name = account.displayName?.ifBlank { null } ?: email.substringBefore("@")
                     val photo = account.photoUrl?.toString()
                     val accountId = account.id ?: "google_${email.hashCode()}"
                     authManager.saveLogin(name, email, photo, accountId)
                     profile = authManager.getProfile()
+
+                    if (!idToken.isNullOrBlank()) {
+                        coroutineScope.launch {
+                            val linkRes = firebaseAuth.linkOrSignInGoogle(idToken, name, email, photo)
+                            if (linkRes.isFailure) {
+                                Toast.makeText(context, linkRes.exceptionOrNull()?.message ?: "Google notice", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    }
+
                     Toast.makeText(
                         context,
                         if (isUrdu) "گوگل اکاؤنٹ ($email) کامیابی سے سائن ان ہو گیا!" else "Google Account ($email) signed in successfully!",
@@ -772,7 +803,208 @@ fun BackupSyncScreen(
             }
         }
 
-        // 3. Google Drive Cloud Backup Card
+        // 3. Firebase Cloud Backup & Restore Card (Foundation)
+        item {
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = Color.White),
+                border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Icon(Icons.Default.CloudQueue, contentDescription = null, tint = Color(0xFF0F8A5F), modifier = Modifier.size(22.dp))
+                            Text(
+                                text = if (isUrdu) "فائر بیس آن لائن کلاؤڈ بیک اپ" else "Firebase Cloud Backup",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 15.sp,
+                                color = Slate900
+                            )
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (firebaseSession.isAnonymous) Color(0xFFF1F5F9) else Color(0xFFECFDF5),
+                            border = BorderStroke(1.dp, if (firebaseSession.isAnonymous) Color(0xFFCBD5E1) else Color(0xFFA7F3D0))
+                        ) {
+                            Text(
+                                text = if (firebaseSession.isAnonymous) {
+                                    if (isUrdu) "گمنام موڈ (Anonymous)" else "Anonymous Cloud"
+                                } else {
+                                    if (isUrdu) "گوگل منسلک ✓" else "Google Linked ✓"
+                                },
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (firebaseSession.isAnonymous) Color(0xFF64748B) else Color(0xFF065F46)
+                            )
+                        }
+                    }
+
+                    Text(
+                        text = if (isUrdu) {
+                            "آپ کا ڈیٹا فائر بیس کلاؤڈ میں آپ کی منفرد یوزر آئی ڈی (${firebaseSession.uid.take(12)}...) کے تحت 100% محفوظ طریقے سے محفوظ کیا جاتا ہے۔"
+                        } else {
+                            "Your encrypted shop state is backed up securely under your private Firebase UID (${firebaseSession.uid.take(12)}...)."
+                        },
+                        fontSize = 11.5.sp,
+                        color = Slate600
+                    )
+
+                    // Cloud state info box
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = Color(0xFFF8FAFC),
+                        border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            if (isLoadingFirebaseCloudInfo) {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = DukanGreenPrimary)
+                                    Text(text = if (isUrdu) "کلاؤڈ ریکارڈ چیک ہو رہا ہے..." else "Checking cloud backup status...", fontSize = 11.sp, color = Slate600)
+                                }
+                            } else if (firebaseCloudBackupInfo != null) {
+                                val info = firebaseCloudBackupInfo!!
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = "${info.shopName} • ${info.formattedSize}",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 12.sp,
+                                            color = Slate900
+                                        )
+                                        Text(
+                                            text = "${info.formattedDate} • ${info.customerCount} Khata, ${info.inventoryCount} Stock",
+                                            fontSize = 10.5.sp,
+                                            color = Slate500
+                                        )
+                                    }
+                                    IconButton(
+                                        onClick = {
+                                            coroutineScope.launch {
+                                                val delRes = backupManager.deleteFirebaseCloudBackup(context)
+                                                if (delRes.isSuccess) {
+                                                    firebaseCloudBackupInfo = null
+                                                    Toast.makeText(context, if (isUrdu) "کلاؤڈ بیک اپ حذف کر دیا گیا" else "Cloud backup deleted", Toast.LENGTH_SHORT).show()
+                                                }
+                                            }
+                                        },
+                                        modifier = Modifier.size(28.dp)
+                                    ) {
+                                        Icon(Icons.Default.DeleteOutline, contentDescription = "Delete", tint = Color(0xFFDC2626), modifier = Modifier.size(16.dp))
+                                    }
+                                }
+                            } else {
+                                Text(
+                                    text = if (isUrdu) "سرور پر فی الوقت کوئی محفوظ شدہ کلاؤڈ بیک اپ موجود نہیں۔" else "No cloud backup found on server yet.",
+                                    fontSize = 11.sp,
+                                    color = Slate500
+                                )
+                            }
+                        }
+                    }
+
+                    // Action buttons: Backup Now and Restore
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = {
+                                coroutineScope.launch {
+                                    isBackingUpFirebase = true
+                                    val result = backupManager.backupToFirebaseCloud(context, state)
+                                    isBackingUpFirebase = false
+                                    if (result.isSuccess) {
+                                        firebaseCloudBackupInfo = result.getOrNull()
+                                        Toast.makeText(
+                                            context,
+                                            if (isUrdu) "کلاؤڈ بیک اپ کامیابی سے محفوظ ہو گیا!" else "Backed up to cloud successfully!",
+                                            Toast.LENGTH_LONG
+                                        ).show()
+                                    } else {
+                                        Toast.makeText(
+                                            context,
+                                            if (isUrdu) "کلاؤڈ بیک اپ میں خرابی: ${result.exceptionOrNull()?.message}" else "Cloud backup failed: ${result.exceptionOrNull()?.message}",
+                                            Toast.LENGTH_LONG
+                                        ).show()
+                                    }
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = DukanGreenPrimary),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.weight(1f).height(44.dp),
+                            enabled = !isBackingUpFirebase
+                        ) {
+                            if (isBackingUpFirebase) {
+                                CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.White, strokeWidth = 2.dp)
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(text = if (isUrdu) "اپلوڈ ہو رہا ہے..." else "Uploading...", fontSize = 12.sp)
+                            } else {
+                                Icon(Icons.Default.CloudUpload, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(text = if (isUrdu) "کلاؤڈ بیک اپ لیں" else "Backup Now", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            }
+                        }
+
+                        Button(
+                            onClick = {
+                                coroutineScope.launch {
+                                    isRestoring = true
+                                    val downloadRes = backupManager.downloadFirebaseCloudBackup(context)
+                                    isRestoring = false
+                                    if (downloadRes.isSuccess) {
+                                        val json = downloadRes.getOrNull() ?: ""
+                                        val validation = backupManager.validateJson(json)
+                                        if (validation.isValid && validation.payloadState != null) {
+                                            pendingRestoreState = validation.payloadState
+                                            pendingValidation = validation
+                                            pendingRestoreSourceTitle = if (isUrdu) "فائر بیس آن لائن کلاؤڈ بیک اپ" else "Firebase Cloud Backup"
+                                            showRestoreDialog = true
+                                        } else {
+                                            validationErrorMessage = validation.errorReason ?: "Corrupted cloud backup payload"
+                                        }
+                                    } else {
+                                        Toast.makeText(
+                                            context,
+                                            if (isUrdu) "کلاؤڈ سے ڈاؤنلوڈ میں مسئلہ: ${downloadRes.exceptionOrNull()?.message}" else "Download failed: ${downloadRes.exceptionOrNull()?.message}",
+                                            Toast.LENGTH_LONG
+                                        ).show()
+                                    }
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0D9488)),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.weight(1f).height(44.dp),
+                            enabled = !isRestoring && firebaseCloudBackupInfo != null
+                        ) {
+                            if (isRestoring) {
+                                CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.White, strokeWidth = 2.dp)
+                            } else {
+                                Icon(Icons.Default.CloudDownload, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(text = if (isUrdu) "کلاؤڈ سے ری اسٹور" else "Restore Cloud", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 4. Google Drive Cloud Backup Card
         item {
             Card(
                 shape = RoundedCornerShape(16.dp),
