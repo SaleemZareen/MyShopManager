@@ -29,6 +29,12 @@ class GoogleDriveBackupProvider(
 
     private fun getOAuthToken(context: Context): String? {
         val googleAccount = GoogleSignIn.getLastSignedInAccount(context)?.account
+            ?: try {
+                val email = com.saleemkhan.myshopmanager.data.GoogleAuthManager.getInstance(context).getProfile().email
+                if (email.isNotBlank()) Account(email, "com.google") else null
+            } catch (_: Exception) {
+                null
+            }
             ?: return null
 
         return try {
@@ -40,7 +46,8 @@ class GoogleDriveBackupProvider(
     }
 
     fun isGoogleLinked(context: Context): Boolean {
-        return GoogleSignIn.getLastSignedInAccount(context) != null
+        return GoogleSignIn.getLastSignedInAccount(context) != null ||
+                com.saleemkhan.myshopmanager.data.GoogleAuthManager.getInstance(context).getProfile().isLoggedIn
     }
 
     suspend fun uploadBackup(context: Context, state: AppState): Result<DriveBackupInfo> = withContext(Dispatchers.IO) {
