@@ -38,6 +38,7 @@ import androidx.credentials.CustomCredential
 import androidx.credentials.exceptions.GetCredentialCancellationException
 import androidx.credentials.exceptions.GetCredentialException
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
+import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.google.android.libraries.identity.googleid.GoogleIdTokenParsingException
 import com.saleemkhan.myshopmanager.data.AiQuotaManager
@@ -153,8 +154,13 @@ fun BackupSyncScreen(
                     .setAutoSelectEnabled(false)
                     .build()
 
+                val signInWithGoogleOption = GetSignInWithGoogleOption.Builder(
+                    serverClientId = fbConfig.oAuthClientId
+                ).build()
+
                 val request = GetCredentialRequest.Builder()
                     .addCredentialOption(googleIdOption)
+                    .addCredentialOption(signInWithGoogleOption)
                     .build()
 
                 val result = credentialManager.getCredential(
