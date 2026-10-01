@@ -3,6 +3,7 @@ package com.saleemkhan.myshopmanager.ui.screens
 import android.accounts.AccountManager
 import android.app.Activity
 import android.content.Context
+import android.content.ContextWrapper
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
@@ -127,7 +128,25 @@ fun BackupSyncScreen(
         isSigningIn = true
         coroutineScope.launch {
             try {
-                val credentialManager = CredentialManager.create(context)
+                // Safely unwrap Activity context from LocalContext
+                var act: Activity? = null
+                var ctx: Context = context
+                while (ctx is ContextWrapper) {
+                    if (ctx is Activity) {
+                        act = ctx
+                        break
+                    }
+                    ctx = ctx.baseContext
+                }
+                val targetActivity = act ?: (context as? Activity)
+
+                if (targetActivity == null) {
+                    isSigningIn = false
+                    Toast.makeText(context, "Activity context is required for Google Sign-In", Toast.LENGTH_SHORT).show()
+                    return@launch
+                }
+
+                val credentialManager = CredentialManager.create(targetActivity)
                 val googleIdOption = GetGoogleIdOption.Builder()
                     .setFilterByAuthorizedAccounts(false)
                     .setServerClientId(fbConfig.oAuthClientId)
@@ -140,7 +159,7 @@ fun BackupSyncScreen(
 
                 val result = credentialManager.getCredential(
                     request = request,
-                    context = context
+                    context = targetActivity
                 )
                 isSigningIn = false
                 val credential = result.credential
@@ -193,16 +212,19 @@ fun BackupSyncScreen(
                 Toast.makeText(context, "Google ID token parsing error: ${e.message}", Toast.LENGTH_LONG).show()
             } catch (e: GetCredentialException) {
                 isSigningIn = false
+                val causeStr = e.cause?.message?.let { " | Cause: $it" } ?: ""
+                val className = e::class.java.simpleName
                 Toast.makeText(
                     context,
-                    if (isUrdu) "گوگل سائن ان میں خرابی (${e.type}): ${e.message}" else "Google Sign-In Error (${e.type}): ${e.message}",
+                    if (isUrdu) "گوگل سائن ان خرابی ($className / ${e.type}): ${e.message}$causeStr" else "Google Sign-In Error ($className / ${e.type}): ${e.message}$causeStr",
                     Toast.LENGTH_LONG
                 ).show()
             } catch (e: Exception) {
                 isSigningIn = false
+                val causeStr = e.cause?.message?.let { " | Cause: $it" } ?: ""
                 Toast.makeText(
                     context,
-                    if (isUrdu) "گوگل سائن ان میں مسئلہ: ${e.message}" else "Sign-In Error: ${e.message}",
+                    if (isUrdu) "گوگل سائن ان میں مسئلہ: ${e.message}$causeStr" else "Sign-In Error: ${e.message}$causeStr",
                     Toast.LENGTH_LONG
                 ).show()
             }
