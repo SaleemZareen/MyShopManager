@@ -1,12 +1,12 @@
 {
-  "projectId": "optimistic-envoy-5ds98",
-  "appId": "1:718510575552:web:0ee256cf002eee907d0225",
-  "apiKey": "AIzaSyB9BNCbcdsDzcctZxZ4uDNdpSS3FipOKZk",
-  "authDomain": "optimistic-envoy-5ds98.firebaseapp.com",
-  "firestoreDatabaseId": "ai-studio-remixmyshopmanag-467f2006-634c-4347-bb49-33d973a470e5",
-  "storageBucket": "optimistic-envoy-5ds98.firebasestorage.app",
-  "messagingSenderId": "718510575552",
+  "projectId": "myshopmanager",
+  "appId": "1:129775070914:android:2304979ae4ade113ed955b",
+  "apiKey": "AIzaSyDek7Kbxpvi40CcyfcfAHkYF1qkCmDeLtY",
+  "authDomain": "myshopmanager.firebaseapp.com",
+  "firestoreDatabaseId": "(default)",
+  "storageBucket": "myshopmanager.firebasestorage.app",
+  "messagingSenderId": "129775070914",
   "measurementId": "",
-  "oAuthClientId": "718510575552-v236dv2t28ptc91tp81ta87gb72mieu9.apps.googleusercontent.com",
+  "oAuthClientId": "129775070914-9qpsad7mmpp84jlbpg5rvblvfrs7jtua.apps.googleusercontent.com",
   "recaptchaSiteKey": ""
 }
