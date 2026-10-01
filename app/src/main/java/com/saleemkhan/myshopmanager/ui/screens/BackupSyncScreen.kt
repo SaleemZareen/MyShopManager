@@ -38,10 +38,7 @@ import androidx.credentials.exceptions.GetCredentialCancellationException
 import androidx.credentials.exceptions.GetCredentialException
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
-import com.google.android.gms.auth.api.signin.GoogleSignIn
-import com.google.android.gms.auth.api.signin.GoogleSignInOptions
-import com.google.android.gms.common.api.ApiException
-import com.google.android.gms.common.api.CommonStatusCodes
+import com.google.android.libraries.identity.googleid.GoogleIdTokenParsingException
 import com.saleemkhan.myshopmanager.data.AiQuotaManager
 import com.saleemkhan.myshopmanager.data.AppStateRepository
 import com.saleemkhan.myshopmanager.data.AutoSyncSettings
@@ -97,20 +94,8 @@ fun BackupSyncScreen(
     var showRestoreDialog by remember { mutableStateOf(false) }
     var validationErrorMessage by remember { mutableStateOf<String?>(null) }
 
-    // Google Sign-In Client
+    // Firebase & Auth Config
     val fbConfig = remember { FirebaseConfig.get(context) }
-    val gso = remember {
-        val builder = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
-            .requestEmail()
-            .requestProfile()
-        if (fbConfig.oAuthClientId.isNotBlank()) {
-            try {
-                builder.requestIdToken(fbConfig.oAuthClientId)
-            } catch (_: Exception) {}
-        }
-        builder.build()
-    }
-    val googleSignInClient = remember { GoogleSignIn.getClient(context, gso) }
 
     fun refreshLists() {
         coroutineScope.launch {
@@ -136,86 +121,6 @@ fun BackupSyncScreen(
     LaunchedEffect(Unit) {
         firebaseAuth.ensureAnonymousSession()
         refreshLists()
-    }
-
-    fun handleSuccessfulGoogleLogin(
-        email: String,
-        idToken: String?,
-        name: String,
-        photo: String?,
-        accountId: String
-    ) {
-        authManager.saveLogin(name, email, photo, accountId)
-        profile = authManager.getProfile()
-
-        if (!idToken.isNullOrBlank()) {
-            coroutineScope.launch {
-                val linkRes = firebaseAuth.linkOrSignInGoogle(idToken, name, email, photo)
-                if (linkRes.isSuccess) {
-                    Toast.makeText(
-                        context,
-                        if (isUrdu) "گوگل اکاؤنٹ ($email) فائر بیس سے کامیابی سے منسلک ہو گیا!" else "Google Account ($email) linked with Firebase successfully!",
-                        Toast.LENGTH_SHORT
-                    ).show()
-                } else {
-                    Toast.makeText(
-                        context,
-                        if (isUrdu) "فائر بیس لنکنگ نوٹس: ${linkRes.exceptionOrNull()?.message}" else "Firebase Notice: ${linkRes.exceptionOrNull()?.message}",
-                        Toast.LENGTH_LONG
-                    ).show()
-                }
-                refreshLists()
-            }
-        } else {
-            Toast.makeText(
-                context,
-                if (isUrdu) "گوگل لاگ ان کامیاب ($email)" else "Google signed in ($email), ID token pending",
-                Toast.LENGTH_SHORT
-            ).show()
-        }
-        refreshLists()
-    }
-
-    val googleSignInLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        isSigningIn = false
-        if (result.data != null) {
-            val task = GoogleSignIn.getSignedInAccountFromIntent(result.data)
-            try {
-                val account = task.getResult(ApiException::class.java)
-                val email = account?.email
-                val idToken = account?.idToken
-                val name = account?.displayName?.ifBlank { null } ?: email?.substringBefore("@") ?: "Google User"
-                val photo = account?.photoUrl?.toString()
-                val accountId = account?.id ?: "google_${(email ?: "").hashCode()}"
-
-                if (!email.isNullOrBlank()) {
-                    handleSuccessfulGoogleLogin(email, idToken, name, photo, accountId)
-                } else {
-                    Toast.makeText(context, if (isUrdu) "گوگل اکاؤنٹ کی تفصیلات موصول نہیں ہوئیں" else "No account details received from Google", Toast.LENGTH_SHORT).show()
-                }
-            } catch (e: ApiException) {
-                val statusCode = e.statusCode
-                val diagnosticMsg = when (statusCode) {
-                    CommonStatusCodes.DEVELOPER_ERROR -> "Developer Error (10): Ensure SHA-1 fingerprint 8E:C5:02:46:06:3C:20:14:FD:63:28:A0:6F:D7:33:BE:17:2C:35:C9 is added to Firebase/Google Cloud Console for package com.saleemkhan.myshopmanager"
-                    12500 -> "Sign-In Failed (12500): Check Play Services / Google Account in device"
-                    CommonStatusCodes.NETWORK_ERROR -> "Network Error (7): Please check internet connection"
-                    CommonStatusCodes.CANCELED -> if (isUrdu) "سائن ان منسوخ کر دیا گیا (16)" else "Sign-in cancelled (16)"
-                    else -> "Google Sign-In Error ($statusCode): ${e.message}"
-                }
-                Toast.makeText(context, diagnosticMsg, Toast.LENGTH_LONG).show()
-            } catch (e: Exception) {
-                e.printStackTrace()
-                Toast.makeText(
-                    context,
-                    if (isUrdu) "گوگل سائن ان میں خرابی: ${e.message}" else "Google Sign-In failed: ${e.message}",
-                    Toast.LENGTH_LONG
-                ).show()
-            }
-        } else if (result.resultCode != Activity.RESULT_CANCELED) {
-            Toast.makeText(context, if (isUrdu) "سائن ان منسوخ یا نامکمل رہا" else "Sign-in cancelled or incomplete", Toast.LENGTH_SHORT).show()
-        }
     }
 
     val launchNativeGoogleAccountPicker = {
@@ -247,28 +152,59 @@ fun BackupSyncScreen(
                     val photo = googleIdTokenCredential.profilePictureUri?.toString()
                     val accountId = "google_${email.hashCode()}"
 
-                    handleSuccessfulGoogleLogin(email, idToken, name, photo, accountId)
+                    if (idToken.isNotBlank()) {
+                        val linkRes = firebaseAuth.linkOrSignInGoogle(idToken, name, email, photo)
+                        if (linkRes.isSuccess) {
+                            authManager.saveLogin(name, email, photo, accountId)
+                            profile = authManager.getProfile()
+                            Toast.makeText(
+                                context,
+                                if (isUrdu) "گوگل اکاؤنٹ ($email) فائر بیس سے کامیابی سے منسلک ہو گیا!" else "Google Account ($email) linked with Firebase successfully!",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        } else {
+                            val errMsg = linkRes.exceptionOrNull()?.message ?: "Firebase authentication failed"
+                            Toast.makeText(
+                                context,
+                                if (isUrdu) "فائر بیس لنکنگ خرابی: $errMsg" else "Firebase Linking Error: $errMsg",
+                                Toast.LENGTH_LONG
+                            ).show()
+                        }
+                        refreshLists()
+                    } else {
+                        Toast.makeText(
+                            context,
+                            if (isUrdu) "گوگل سائن ان: ID ٹوکن موصول نہیں ہوا" else "Google Sign-In: ID token was empty",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
                 } else {
-                    // Fallback to GoogleSignInClient
-                    val signInIntent = googleSignInClient.signInIntent
-                    googleSignInLauncher.launch(signInIntent)
+                    Toast.makeText(
+                        context,
+                        if (isUrdu) "غیر متوقع اسناد موصول ہوئیں: ${credential.type}" else "Unexpected credential type: ${credential.type}",
+                        Toast.LENGTH_LONG
+                    ).show()
                 }
             } catch (e: GetCredentialCancellationException) {
                 isSigningIn = false
                 Toast.makeText(context, if (isUrdu) "سائن ان منسوخ کر دیا گیا" else "Sign-in cancelled", Toast.LENGTH_SHORT).show()
-            } catch (_: Exception) {
-                // Fallback to GoogleSignInClient
-                try {
-                    val signInIntent = googleSignInClient.signInIntent
-                    googleSignInLauncher.launch(signInIntent)
-                } catch (e2: Exception) {
-                    isSigningIn = false
-                    Toast.makeText(
-                        context,
-                        if (isUrdu) "گوگل سائن ان شروع کرنے میں مسئلہ: ${e2.message}" else "Error opening Google Sign-In: ${e2.message}",
-                        Toast.LENGTH_LONG
-                    ).show()
-                }
+            } catch (e: GoogleIdTokenParsingException) {
+                isSigningIn = false
+                Toast.makeText(context, "Google ID token parsing error: ${e.message}", Toast.LENGTH_LONG).show()
+            } catch (e: GetCredentialException) {
+                isSigningIn = false
+                Toast.makeText(
+                    context,
+                    if (isUrdu) "گوگل سائن ان میں خرابی (${e.type}): ${e.message}" else "Google Sign-In Error (${e.type}): ${e.message}",
+                    Toast.LENGTH_LONG
+                ).show()
+            } catch (e: Exception) {
+                isSigningIn = false
+                Toast.makeText(
+                    context,
+                    if (isUrdu) "گوگل سائن ان میں مسئلہ: ${e.message}" else "Sign-In Error: ${e.message}",
+                    Toast.LENGTH_LONG
+                ).show()
             }
         }
     }
@@ -541,10 +477,8 @@ fun BackupSyncScreen(
 
                             OutlinedButton(
                                 onClick = {
-                                    try {
-                                        googleSignInClient.signOut()
-                                    } catch (_: Exception) {}
                                     authManager.signOut()
+                                    firebaseAuth.signOut()
                                     profile = authManager.getProfile()
                                     driveBackupsList = emptyList()
                                     Toast.makeText(
@@ -552,6 +486,7 @@ fun BackupSyncScreen(
                                         if (isUrdu) "گوگل اکاؤنٹ سائن آؤٹ کر دیا گیا" else "Google Account signed out",
                                         Toast.LENGTH_SHORT
                                     ).show()
+                                    refreshLists()
                                 },
                                 shape = RoundedCornerShape(10.dp),
                                 colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFDC2626)),

@@ -3,7 +3,6 @@ package com.saleemkhan.myshopmanager.data.backup
 import android.accounts.Account
 import android.content.Context
 import com.google.android.gms.auth.GoogleAuthUtil
-import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.saleemkhan.myshopmanager.model.AppState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -28,14 +27,13 @@ class GoogleDriveBackupProvider(
     }
 
     private fun getOAuthToken(context: Context): String? {
-        val googleAccount = GoogleSignIn.getLastSignedInAccount(context)?.account
-            ?: try {
-                val email = com.saleemkhan.myshopmanager.data.GoogleAuthManager.getInstance(context).getProfile().email
-                if (email.isNotBlank()) Account(email, "com.google") else null
-            } catch (_: Exception) {
-                null
-            }
-            ?: return null
+        val email = com.saleemkhan.myshopmanager.data.GoogleAuthManager.getInstance(context).getProfile().email
+        if (email.isBlank()) return null
+        val googleAccount = try {
+            Account(email.trim(), "com.google")
+        } catch (_: Exception) {
+            null
+        } ?: return null
 
         return try {
             GoogleAuthUtil.getToken(context, googleAccount, DRIVE_OAUTH_SCOPES)
@@ -46,8 +44,7 @@ class GoogleDriveBackupProvider(
     }
 
     fun isGoogleLinked(context: Context): Boolean {
-        return GoogleSignIn.getLastSignedInAccount(context) != null ||
-                com.saleemkhan.myshopmanager.data.GoogleAuthManager.getInstance(context).getProfile().isLoggedIn
+        return com.saleemkhan.myshopmanager.data.GoogleAuthManager.getInstance(context).getProfile().isLoggedIn
     }
 
     suspend fun uploadBackup(context: Context, state: AppState): Result<DriveBackupInfo> = withContext(Dispatchers.IO) {
