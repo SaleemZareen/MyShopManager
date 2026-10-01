@@ -1,1 +1,55 @@
-
+{
+  "project_info": {
+    "project_number": "129775070914",
+    "project_id": "myshopmanager",
+    "storage_bucket": "myshopmanager.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:129775070914:android:5b3e409ce55a7363ed955b",
+        "android_client_info": {
+          "package_name": "com.saleemkhan.myshopmanager"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "129775070914-aeheq9ei2m81urs8jrgjv4o4h2vq67he.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.saleemkhan.myshopmanager",
+            "certificate_hash": "8ec50246063c2014fd6328a06fd733be172c35c9"
+          }
+        },
+        {
+          "client_id": "129775070914-qv3hi4g9m384f4bk14vboaibjhfj6fb6.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.saleemkhan.myshopmanager",
+            "certificate_hash": "5290f3bb5b7ee307ab16ae0eb21f7fbc897af3e0"
+          }
+        },
+        {
+          "client_id": "129775070914-9qpsad7mmpp84jlbpg5rvblvfrs7jtua.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDek7Kbxpvi40CcyfcfAHkYF1qkCmDeLtY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "129775070914-9qpsad7mmpp84jlbpg5rvblvfrs7jtua.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
