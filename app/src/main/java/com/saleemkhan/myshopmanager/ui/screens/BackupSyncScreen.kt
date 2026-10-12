@@ -1,6 +1,5 @@
 package com.saleemkhan.myshopmanager.ui.screens
 
-import android.accounts.AccountManager
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
@@ -41,9 +40,11 @@ import androidx.credentials.exceptions.NoCredentialException
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.google.android.libraries.identity.googleid.GoogleIdTokenParsingException
+import com.google.android.gms.auth.UserRecoverableAuthException
 import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 import com.google.android.gms.common.api.ApiException
+import com.google.android.gms.common.api.Scope
 import com.saleemkhan.myshopmanager.data.AiQuotaManager
 import com.saleemkhan.myshopmanager.data.AppStateRepository
 import com.saleemkhan.myshopmanager.data.AutoSyncSettings
@@ -89,6 +90,7 @@ fun BackupSyncScreen(
     var driveBackupsList by remember { mutableStateOf<List<DriveBackupInfo>>(emptyList()) }
     var showLocalBackupsList by remember { mutableStateOf(false) }
     var showDriveBackupsList by remember { mutableStateOf(false) }
+    var isDriveApiDisabled by remember { mutableStateOf(false) }
 
     // Restore dialog state
     var pendingRestoreState by remember { mutableStateOf<AppState?>(null) }
@@ -106,6 +108,10 @@ fun BackupSyncScreen(
         val builder = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
             .requestEmail()
             .requestProfile()
+            .requestScopes(
+                Scope("https://www.googleapis.com/auth/drive.appdata"),
+                Scope("https://www.googleapis.com/auth/drive.file")
+            )
         if (fbConfig.oAuthClientId.isNotBlank()) {
             try {
                 builder.requestIdToken(fbConfig.oAuthClientId)
@@ -114,6 +120,49 @@ fun BackupSyncScreen(
         builder.build()
     }
     val googleSignInClient = remember { GoogleSignIn.getClient(context, gso) }
+
+    var pendingAuthIntent by remember { mutableStateOf<Intent?>(null) }
+    var refreshListsRef by remember { mutableStateOf<() -> Unit>({}) }
+
+    val authConsentLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            pendingAuthIntent = null
+            Toast.makeText(
+                context,
+                if (isUrdu) "گوگل ڈرائیو کی اجازت مل گئی!" else "Google Drive permission granted!",
+                Toast.LENGTH_SHORT
+            ).show()
+            refreshListsRef()
+        } else {
+            Toast.makeText(
+                context,
+                if (isUrdu) "گوگل ڈرائیو کی اجازت نہیں دی گئی" else "Google Drive permission was not granted",
+                Toast.LENGTH_LONG
+            ).show()
+        }
+    }
+
+    fun handleDriveAuthException(throwable: Throwable?): Boolean {
+        if (throwable == null) return false
+        val recoveryIntent = when (throwable) {
+            is GoogleDriveAuthException -> throwable.recoveryIntent
+            is UserRecoverableAuthException -> throwable.intent
+            else -> (throwable.cause as? UserRecoverableAuthException)?.intent
+                ?: (throwable.cause as? GoogleDriveAuthException)?.recoveryIntent
+        }
+        if (recoveryIntent != null) {
+            pendingAuthIntent = recoveryIntent
+            try {
+                authConsentLauncher.launch(recoveryIntent)
+            } catch (e: Exception) {
+                Toast.makeText(context, "Authorization error: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
+            return true
+        }
+        return false
+    }
 
     fun refreshLists() {
         coroutineScope.launch {
@@ -130,11 +179,21 @@ fun BackupSyncScreen(
                 val driveRes = backupManager.listGoogleDriveBackups(context)
                 if (driveRes.isSuccess) {
                     driveBackupsList = driveRes.getOrDefault(emptyList())
+                    pendingAuthIntent = null
+                    isDriveApiDisabled = false
+                } else {
+                    val ex = driveRes.exceptionOrNull()
+                    if (ex?.message?.contains("Google Drive API") == true || ex?.message?.contains("API Disabled") == true) {
+                        isDriveApiDisabled = true
+                    }
+                    handleDriveAuthException(ex)
                 }
                 isLoadingDriveList = false
             }
         }
     }
+
+    refreshListsRef = { refreshLists() }
 
     LaunchedEffect(Unit) {
         firebaseAuth.ensureAnonymousSession()
@@ -1190,6 +1249,8 @@ fun BackupSyncScreen(
                                     isBackingUpDrive = false
                                     if (result.isSuccess) {
                                         profile = authManager.getProfile()
+                                        pendingAuthIntent = null
+                                        isDriveApiDisabled = false
                                         refreshLists()
                                         Toast.makeText(
                                             context,
@@ -1197,11 +1258,17 @@ fun BackupSyncScreen(
                                             Toast.LENGTH_LONG
                                         ).show()
                                     } else {
-                                        Toast.makeText(
-                                            context,
-                                            if (isUrdu) "ڈرائیو بیک اپ میں مسئلہ: ${result.exceptionOrNull()?.message}" else "Drive backup error: ${result.exceptionOrNull()?.message}",
-                                            Toast.LENGTH_LONG
-                                        ).show()
+                                        val ex = result.exceptionOrNull()
+                                        if (ex?.message?.contains("Google Drive API") == true || ex?.message?.contains("API Disabled") == true) {
+                                            isDriveApiDisabled = true
+                                        }
+                                        if (!handleDriveAuthException(ex)) {
+                                            Toast.makeText(
+                                                context,
+                                                if (isUrdu) "ڈرائیو بیک اپ میں مسئلہ: ${ex?.message}" else "Drive backup error: ${ex?.message}",
+                                                Toast.LENGTH_LONG
+                                            ).show()
+                                        }
                                     }
                                 }
                             },
@@ -1222,6 +1289,49 @@ fun BackupSyncScreen(
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 13.sp
                                 )
+                            }
+                        }
+
+                        if (isDriveApiDisabled) {
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = Color(0xFFFEF2F2),
+                                border = BorderStroke(1.dp, Color(0xFFFCA5A5)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Text(
+                                        text = if (isUrdu) "⚠️ گوگل ڈرائیو API کلاؤڈ کنسول میں بند (Disabled) ہے۔ بیک اپ چالو کرنے کے لیے نیچے بٹن سے 1 کلک میں آن کریں۔"
+                                               else "⚠️ Google Drive API is disabled in Cloud Console. Please click below to enable it.",
+                                        fontSize = 11.5.sp,
+                                        color = Color(0xFF991B1B),
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Button(
+                                        onClick = {
+                                            try {
+                                                val url = "https://console.developers.google.com/apis/api/drive.googleapis.com/overview?project=129775070914"
+                                                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                                            } catch (_: Exception) {
+                                                Toast.makeText(context, "براؤزر میں کنسول کھولنے میں مسئلہ ہوا", Toast.LENGTH_SHORT).show()
+                                            }
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626)),
+                                        shape = RoundedCornerShape(8.dp),
+                                        modifier = Modifier.fillMaxWidth().height(38.dp)
+                                    ) {
+                                        Icon(Icons.Default.OpenInBrowser, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            text = if (isUrdu) "Google Drive API آن کریں (Enable Drive API)" else "Enable Google Drive API",
+                                            fontSize = 11.5.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
                             }
                         }
 
@@ -1315,7 +1425,10 @@ fun BackupSyncScreen(
                                                                         validationErrorMessage = validation.errorReason ?: "Corrupt Drive file"
                                                                     }
                                                                 } else {
-                                                                    Toast.makeText(context, "Download failed: ${downloadRes.exceptionOrNull()?.message}", Toast.LENGTH_SHORT).show()
+                                                                    val ex = downloadRes.exceptionOrNull()
+                                                                    if (!handleDriveAuthException(ex)) {
+                                                                        Toast.makeText(context, "Download failed: ${ex?.message}", Toast.LENGTH_SHORT).show()
+                                                                    }
                                                                 }
                                                             }
                                                         },
@@ -1331,7 +1444,10 @@ fun BackupSyncScreen(
                                                                 if (delRes.isSuccess) {
                                                                     refreshLists()
                                                                 } else {
-                                                                    Toast.makeText(context, "Delete failed: ${delRes.exceptionOrNull()?.message}", Toast.LENGTH_SHORT).show()
+                                                                    val ex = delRes.exceptionOrNull()
+                                                                    if (!handleDriveAuthException(ex)) {
+                                                                        Toast.makeText(context, "Delete failed: ${ex?.message}", Toast.LENGTH_SHORT).show()
+                                                                    }
                                                                 }
                                                             }
                                                         },
