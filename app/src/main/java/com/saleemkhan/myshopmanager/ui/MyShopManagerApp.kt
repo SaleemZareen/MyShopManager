@@ -1,5 +1,6 @@
 package com.saleemkhan.myshopmanager.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
@@ -61,6 +62,17 @@ fun MyShopManagerApp() {
         } else if (currentScreen != Screen.DASHBOARD) {
             currentScreen = Screen.DASHBOARD
             screenHistory = listOf(Screen.DASHBOARD)
+        }
+    }
+
+    // System back button / back gesture
+    BackHandler(
+        enabled = !isLocked && (drawerState.isOpen || currentScreen != Screen.DASHBOARD || screenHistory.size > 1)
+    ) {
+        if (drawerState.isOpen) {
+            coroutineScope.launch { drawerState.close() }
+        } else {
+            handleBack()
         }
     }
 
