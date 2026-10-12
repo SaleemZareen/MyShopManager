@@ -1,24 +1,29 @@
 package com.saleemkhan.myshopmanager.data.firebase
 
 import android.content.Context
-import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import java.io.InputStreamReader
 
 data class FirebaseAppConfig(
-    val projectId: String = "myshopmanager",
-    val appId: String = "1:129775070914:android:2304979ae4ade113ed955b",
-    val apiKey: String = "AIzaSyDek7Kbxpvi40CcyfcfAHkYF1qkCmDeLtY",
-    val authDomain: String = "myshopmanager.firebaseapp.com",
+    val projectId: String = "",
+    val appId: String = "",
+    val apiKey: String = "",
+    val authDomain: String = "",
     val firestoreDatabaseId: String = "(default)",
-    val storageBucket: String = "myshopmanager.firebasestorage.app",
-    val messagingSenderId: String = "129775070914",
-    val oAuthClientId: String = "129775070914-9qpsad7mmpp84jlbpg5rvblvfrs7jtua.apps.googleusercontent.com"
-)
+    val storageBucket: String = "",
+    val messagingSenderId: String = "",
+    val oAuthClientId: String = ""
+) {
+    val isValid: Boolean get() = apiKey.isNotBlank() && projectId.isNotBlank()
+}
 
 object FirebaseConfig {
     @Volatile
     private var cachedConfig: FirebaseAppConfig? = null
+
+    fun resetCache() {
+        cachedConfig = null
+    }
 
     fun get(context: Context): FirebaseAppConfig {
         cachedConfig?.let { return it }
@@ -30,21 +35,21 @@ object FirebaseConfig {
             val jsonObject = jsonElement.asJsonObject
 
             val config = FirebaseAppConfig(
-                projectId = jsonObject.get("projectId")?.asString ?: "myshopmanager",
-                appId = jsonObject.get("appId")?.asString ?: "1:129775070914:android:2304979ae4ade113ed955b",
-                apiKey = jsonObject.get("apiKey")?.asString ?: "AIzaSyDek7Kbxpvi40CcyfcfAHkYF1qkCmDeLtY",
-                authDomain = jsonObject.get("authDomain")?.asString ?: "myshopmanager.firebaseapp.com",
+                projectId = jsonObject.get("projectId")?.asString ?: "",
+                appId = jsonObject.get("appId")?.asString ?: "",
+                apiKey = jsonObject.get("apiKey")?.asString ?: "",
+                authDomain = jsonObject.get("authDomain")?.asString ?: "",
                 firestoreDatabaseId = jsonObject.get("firestoreDatabaseId")?.asString ?: "(default)",
-                storageBucket = jsonObject.get("storageBucket")?.asString ?: "myshopmanager.firebasestorage.app",
-                messagingSenderId = jsonObject.get("messagingSenderId")?.asString ?: "129775070914",
-                oAuthClientId = jsonObject.get("oAuthClientId")?.asString ?: "129775070914-9qpsad7mmpp84jlbpg5rvblvfrs7jtua.apps.googleusercontent.com"
+                storageBucket = jsonObject.get("storageBucket")?.asString ?: "",
+                messagingSenderId = jsonObject.get("messagingSenderId")?.asString ?: "",
+                oAuthClientId = jsonObject.get("oAuthClientId")?.asString ?: ""
             )
             cachedConfig = config
             config
         } catch (_: Exception) {
-            val fallback = FirebaseAppConfig()
-            cachedConfig = fallback
-            fallback
+            val emptyConfig = FirebaseAppConfig()
+            cachedConfig = emptyConfig
+            emptyConfig
         }
     }
 }

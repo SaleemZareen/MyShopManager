@@ -3,6 +3,7 @@ package com.saleemkhan.myshopmanager.data
 import android.content.Context
 import android.content.SharedPreferences
 import com.google.gson.Gson
+import com.saleemkhan.myshopmanager.data.db.MyShopDatabase
 import com.saleemkhan.myshopmanager.model.*
 import com.saleemkhan.myshopmanager.utils.FormatUtils
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -10,8 +11,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 class AppStateRepository private constructor(context: Context) {
-    private val prefs: SharedPreferences = context.getSharedPreferences("myshopmanager_state_prefs", Context.MODE_PRIVATE)
+    private val appContext = context.applicationContext
+    private val prefs: SharedPreferences = appContext.getSharedPreferences("myshopmanager_state_prefs", Context.MODE_PRIVATE)
     private val gson = Gson()
+    private val database = MyShopDatabase.getInstance(appContext)
 
     private val _appState = MutableStateFlow(loadState())
     val appState: StateFlow<AppState> = _appState.asStateFlow()
@@ -23,6 +26,7 @@ class AppStateRepository private constructor(context: Context) {
         private const val STORAGE_KEY = "my_shop_manager_app_state_v2"
         private const val DISMISSED_NOTIFS_KEY = "my_shop_dismissed_notifs"
         private const val PERMISSIONS_SETUP_DONE_KEY = "permissions_setup_done"
+        private const val DB_MIGRATED_KEY = "sqlite_db_migrated_v1"
 
         @Volatile
         private var INSTANCE: AppStateRepository? = null
@@ -70,11 +74,17 @@ class AppStateRepository private constructor(context: Context) {
     }
 
     private fun loadState(): AppState {
-        return try {
+        val isMigrated = prefs.getBoolean(DB_MIGRATED_KEY, false)
+        if (isMigrated) {
+            return database.loadAppState()
+        }
+
+        // Load legacy JSON state & perform safe atomic migration to SQLite DB
+        val jsonState = try {
             val json = prefs.getString(STORAGE_KEY, null)
             if (!json.isNullOrBlank()) {
-                val state = gson.fromJson(json, AppState::class.java)
-                state ?: FormatUtils.DEFAULT_APP_STATE
+                val parsed = gson.fromJson(json, AppState::class.java)
+                parsed ?: FormatUtils.DEFAULT_APP_STATE
             } else {
                 FormatUtils.DEFAULT_APP_STATE
             }
@@ -82,10 +92,22 @@ class AppStateRepository private constructor(context: Context) {
             e.printStackTrace()
             FormatUtils.DEFAULT_APP_STATE
         }
+
+        // Save into SQLite database atomically
+        val success = database.saveAppStateAtomic(jsonState)
+        if (success) {
+            prefs.edit().putBoolean(DB_MIGRATED_KEY, true).apply()
+        }
+        return jsonState
     }
 
     fun saveState(state: AppState) {
         _appState.value = state
+        // 1. Transactional write to SQLite database
+        database.saveAppStateAtomic(state)
+        prefs.edit().putBoolean(DB_MIGRATED_KEY, true).apply()
+
+        // 2. Secondary backup write to SharedPreferences JSON
         try {
             val json = gson.toJson(state)
             prefs.edit().putString(STORAGE_KEY, json).apply()

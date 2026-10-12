@@ -76,10 +76,34 @@ data class FbrSummary(
     val closingStockValue: Double get() = stockValue
     val totalSupplierPayables: Double get() = totalPayables
     val totalLoans: Double get() = outstandingLoans
-    val estimatedIncomeTax: Double get() = Math.max(0.0, ((netProfit ?: 0.0) - 600000.0) * 0.15)
+    val estimatedIncomeTax: Double get() = TaxEngine.calculateFbrNonSalariedTax(netProfit ?: 0.0)
 }
 
 object TaxEngine {
+
+    /**
+     * Official FBR Income Tax Slab calculation for Non-Salaried Individuals & AOPs
+     * according to the First Schedule (Part I, Division I) of Income Tax Ordinance 2001:
+     * - Up to Rs. 600,000: 0% tax
+     * - Rs. 600,001 to Rs. 1,200,000: 15% of amount exceeding Rs. 600,000
+     * - Rs. 1,200,001 to Rs. 1,600,000: Rs. 90,000 + 20% of amount exceeding Rs. 1,200,000
+     * - Rs. 1,600,001 to Rs. 3,200,000: Rs. 170,000 + 30% of amount exceeding Rs. 1,600,000
+     * - Rs. 3,200,001 to Rs. 5,600,000: Rs. 650,000 + 40% of amount exceeding Rs. 3,200,000
+     * - Exceeding Rs. 5,600,000: Rs. 1,610,000 + 45% of amount exceeding Rs. 5,600,000
+     */
+    fun calculateFbrNonSalariedTax(taxableIncome: Double): Double {
+        if (taxableIncome <= 600000.0) return 0.0
+        val income = (taxableIncome * 100.0).run { Math.round(this) / 100.0 }
+
+        return when {
+            income <= 1200000.0 -> (income - 600000.0) * 0.15
+            income <= 1600000.0 -> 90000.0 + (income - 1200000.0) * 0.20
+            income <= 3200000.0 -> 170000.0 + (income - 1600000.0) * 0.30
+            income <= 5600000.0 -> 650000.0 + (income - 3200000.0) * 0.40
+            else -> 1610000.0 + (income - 5600000.0) * 0.45
+        }
+    }
+
     fun calculateFbrSummary(state: AppState): FbrSummary {
         val rawTransactions = state.transactions
         val inventory = state.inventory
