@@ -3710,7 +3710,7 @@ fun ReceiptForm(
         ?: state.bankAccounts.firstOrNull()
 
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        // ==================== CARD 1: SELECT CUSTOMER FROM KHATA ====================
+        // ==================== CARD 1: REGISTERED CUSTOMERS PREVIEW LIST & SEARCH ====================
         Card(
             shape = RoundedCornerShape(16.dp),
             colors = CardDefaults.cardColors(containerColor = Color.White),
@@ -3719,7 +3719,7 @@ fun ReceiptForm(
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                // Top Row: Collection Icon + Heading + Customer Counter Pill
+                // Top Row: Icon + Heading + Customer Counter Pill
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -3731,13 +3731,13 @@ fun ReceiptForm(
                         modifier = Modifier.weight(1f, fill = false)
                     ) {
                         Icon(
-                            imageVector = Icons.Default.Payments,
+                            imageVector = Icons.Default.People,
                             contentDescription = null,
                             tint = Color(0xFFD97706),
                             modifier = Modifier.size(20.dp)
                         )
                         Text(
-                            text = if (isUrdu) "کھاتہ سے گاہک منتخب کریں" else "Select Customer from Khata",
+                            text = if (isUrdu) "رجسٹرڈ گاہکوں کی فہرست" else "Registered Customers List",
                             fontWeight = FontWeight.Bold,
                             fontSize = 13.5.sp,
                             color = Slate900
@@ -3751,7 +3751,7 @@ fun ReceiptForm(
                         border = BorderStroke(1.dp, Color(0xFFFDE68A))
                     ) {
                         Text(
-                            text = "${debtCustomers.size} ${if (isUrdu) "ادھار گاہک" else "Customers with Due"}",
+                            text = "${filteredCustomers.size} ${if (isUrdu) "گاہک" else "Customers"}",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color(0xFFB45309),
@@ -3760,12 +3760,11 @@ fun ReceiptForm(
                     }
                 }
 
-                // Search Box
+                // Moved Search Box: "Search customer name or phone..."
                 OutlinedTextField(
                     value = customerSearchQuery,
                     onValueChange = {
                         customerSearchQuery = it
-                        if (it.isNotBlank()) isCustomerMenuOpen = true
                     },
                     placeholder = {
                         Text(
@@ -3791,10 +3790,97 @@ fun ReceiptForm(
                     modifier = Modifier.fillMaxWidth()
                 )
 
-                // Subheading & Customer Dropdown
+                // Registered Customers List Preview
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        text = if (isUrdu) "رجسٹرڈ گاہکوں کا جائزہ (منتخب کرنے کے لیے کلک کریں):" else "Registered Customers Preview (Click to select):",
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 11.sp,
+                        color = Slate600
+                    )
+
+                    if (filteredCustomers.isEmpty()) {
+                        Text(
+                            text = if (isUrdu) "کوئی رجسٹرڈ گاہک نہیں ملا" else "No registered customer found",
+                            fontSize = 12.sp,
+                            color = Slate400,
+                            modifier = Modifier.padding(vertical = 4.dp)
+                        )
+                    } else {
+                        filteredCustomers.take(5).forEach { cust ->
+                            val isSel = selectedCustomer?.id == cust.id
+                            Surface(
+                                onClick = { onSelectCustomer(cust) },
+                                shape = RoundedCornerShape(10.dp),
+                                color = if (isSel) Color(0xFFFFFBEB) else Slate50,
+                                border = BorderStroke(1.dp, if (isSel) Color(0xFFFDE68A) else Slate200),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column {
+                                        Text(cust.name, fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Slate900)
+                                        if (cust.phone.isNotBlank()) {
+                                            Text(cust.phone, fontSize = 10.sp, color = Slate500)
+                                        }
+                                    }
+                                    Surface(
+                                        shape = RoundedCornerShape(6.dp),
+                                        color = if (cust.totalCredit > 0) Color(0xFFFEF2F2) else Color(0xFFECFDF5)
+                                    ) {
+                                        Text(
+                                            text = "${if (isUrdu) "باقایہ: " else "Due: "}${FormatUtils.formatCurrency(cust.totalCredit)}",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 10.5.sp,
+                                            color = if (cust.totalCredit > 0) RedDanger else DukanGreenHover,
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // ==================== CARD 2: SELECT CUSTOMER & RECORD RECOVERY ====================
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = Color.White),
+            border = BorderStroke(1.dp, Slate200),
+            elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                // Top Heading
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Payments,
+                        contentDescription = null,
+                        tint = Color(0xFFD97706),
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Text(
+                        text = if (isUrdu) "ادھار والے گاہک سے وصولی درج کریں" else "Select Customer & Collect Recovery",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.5.sp,
+                        color = Slate900
+                    )
+                }
+
+                // Customer Dropdown & Custom Name Text Box
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(
-                        text = if (isUrdu) "ادھار والے گاہک کی فہرست:" else "Customer with Due Balance",
+                        text = if (isUrdu) "ادھار والے گاہک کی فہرست / نیا نام:" else "Customer with Due Balance / Custom Name",
                         fontWeight = FontWeight.SemiBold,
                         fontSize = 11.5.sp,
                         color = Slate700
@@ -3807,7 +3893,7 @@ fun ReceiptForm(
                         OutlinedTextField(
                             value = selectedCustomer?.name ?: "",
                             onValueChange = {},
-                            placeholder = { Text(if (isUrdu) "گاہک منتخب کریں..." else "Select Customer...", color = Slate400) },
+                            placeholder = { Text(if (isUrdu) "گاہک منتخب کریں یا نام درج کریں..." else "Select Customer...", color = Slate400) },
                             readOnly = true,
                             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = isCustomerMenuOpen) },
                             shape = RoundedCornerShape(12.dp),
@@ -4169,7 +4255,7 @@ fun PaymentForm(
         ?: state.bankAccounts.firstOrNull()
 
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        // ==================== CARD 1: SELECT SUPPLIER ====================
+        // ==================== CARD 1: REGISTERED SUPPLIERS PREVIEW LIST & SEARCH ====================
         Card(
             shape = RoundedCornerShape(16.dp),
             colors = CardDefaults.cardColors(containerColor = Color.White),
@@ -4196,21 +4282,21 @@ fun PaymentForm(
                             modifier = Modifier.size(20.dp)
                         )
                         Text(
-                            text = if (isUrdu) "سپلائر منتخب کریں" else "Select Supplier",
+                            text = if (isUrdu) "رجسٹرڈ سپلائرز کی فہرست" else "Registered Suppliers List",
                             fontWeight = FontWeight.Bold,
                             fontSize = 13.5.sp,
                             color = Slate900
                         )
                     }
 
-                    // Supplier Counter Pill: "0 Suppliers" (or count of added suppliers)
+                    // Supplier Counter Pill
                     Surface(
                         shape = RoundedCornerShape(8.dp),
                         color = Color(0xFFF5F3FF),
                         border = BorderStroke(1.dp, Color(0xFFDDD6FE))
                     ) {
                         Text(
-                            text = "${state.suppliers.size} ${if (isUrdu) "سپلائرز" else "Suppliers"}",
+                            text = "${filteredSuppliers.size} ${if (isUrdu) "سپلائرز" else "Suppliers"}",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color(0xFF6D28D9),
@@ -4219,12 +4305,11 @@ fun PaymentForm(
                     }
                 }
 
-                // Search Box: "search supplier with name or phone number"
+                // Moved Search Box: "Search supplier with name or phone number"
                 OutlinedTextField(
                     value = supplierSearchQuery,
                     onValueChange = {
                         supplierSearchQuery = it
-                        if (it.isNotBlank()) isSupplierMenuOpen = true
                     },
                     placeholder = {
                         Text(
@@ -4250,10 +4335,97 @@ fun PaymentForm(
                     modifier = Modifier.fillMaxWidth()
                 )
 
-                // Subheading & Supplier to Pay Dropdown (retained)
+                // Registered Suppliers List Preview
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        text = if (isUrdu) "رجسٹرڈ سپلائرز کا جائزہ (منتخب کرنے کے لیے کلک کریں):" else "Registered Suppliers Preview (Click to select):",
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 11.sp,
+                        color = Slate600
+                    )
+
+                    if (filteredSuppliers.isEmpty()) {
+                        Text(
+                            text = if (isUrdu) "کوئی رجسٹرڈ سپلائر نہیں ملا" else "No registered supplier found",
+                            fontSize = 12.sp,
+                            color = Slate400,
+                            modifier = Modifier.padding(vertical = 4.dp)
+                        )
+                    } else {
+                        filteredSuppliers.take(5).forEach { supp ->
+                            val isSel = selectedSupplier?.id == supp.id
+                            Surface(
+                                onClick = { onSelectSupplier(supp) },
+                                shape = RoundedCornerShape(10.dp),
+                                color = if (isSel) Color(0xFFF5F3FF) else Slate50,
+                                border = BorderStroke(1.dp, if (isSel) Color(0xFFDDD6FE) else Slate200),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column {
+                                        Text(supp.name, fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Slate900)
+                                        if (supp.phone.isNotBlank()) {
+                                            Text(supp.phone, fontSize = 10.sp, color = Slate500)
+                                        }
+                                    }
+                                    Surface(
+                                        shape = RoundedCornerShape(6.dp),
+                                        color = if (supp.totalPayable > 0) Color(0xFFF5F3FF) else Color(0xFFECFDF5)
+                                    ) {
+                                        Text(
+                                            text = "${if (isUrdu) "واجب الادا: " else "Owed: "}${FormatUtils.formatCurrency(supp.totalPayable)}",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 10.5.sp,
+                                            color = if (supp.totalPayable > 0) Color(0xFF7C3AED) else DukanGreenHover,
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // ==================== CARD 2: SELECT SUPPLIER & RECORD PAYMENT ====================
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = Color.White),
+            border = BorderStroke(1.dp, Slate200),
+            elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                // Heading
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.LocalShipping,
+                        contentDescription = null,
+                        tint = Color(0xFF7C3AED),
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Text(
+                        text = if (isUrdu) "سپلائر کو ادائیگی درج کریں" else "Select Supplier & Record Payment",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.5.sp,
+                        color = Slate900
+                    )
+                }
+
+                // Subheading & Supplier to Pay Dropdown
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(
-                        text = if (isUrdu) "سپلائر جس کو ادائیگی کرنی ہے:" else "Supplier to Pay",
+                        text = if (isUrdu) "سپلائر جس کو ادائیگی کرنی ہے / نیا نام:" else "Supplier to Pay / Custom Name",
                         fontWeight = FontWeight.SemiBold,
                         fontSize = 11.5.sp,
                         color = Slate700

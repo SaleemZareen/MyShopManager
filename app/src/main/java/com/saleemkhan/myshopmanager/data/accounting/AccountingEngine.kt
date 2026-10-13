@@ -299,28 +299,62 @@ object AccountingEngine {
                 }
 
                 // 3. Inventory addition & AVCO recalculation
-                if (!tx.itemId.isNullOrBlank() && tx.qtyChange != null && tx.qtyChange > 0.0) {
-                    val purchasedQty = tx.qtyChange
-                    val purchaseUnitCost = tx.unitCost ?: (if (purchasedQty > 0) amount / purchasedQty else 0.0)
+                val purchasedQty = tx.qtyChange ?: 1.0
+                if (purchasedQty > 0.0) {
+                    var targetItemId = tx.itemId
+                    val notesRaw = tx.notes ?: ""
+                    val extractedItemName = if (notesRaw.contains("Purchase: ")) {
+                        notesRaw.substringAfter("Purchase: ").substringBefore(" x ").trim()
+                    } else ""
 
-                    updatedInventory = updatedInventory.map { item ->
-                        if (item.id == tx.itemId) {
-                            val openingStockToKeep = if (item.openingStock > 0.0) item.openingStock else if (item.purchasedQty == 0.0 && item.soldQty == 0.0) item.quantity else 0.0
-                            val openingCostToKeep = if (item.openingCostPrice > 0.0) item.openingCostPrice else if (item.purchasedQty == 0.0 && item.soldQty == 0.0) item.purchasePrice else item.purchasePrice
-                            val newAvco = calculateAvcoOnPurchase(
-                                existingQuantity = item.quantity,
-                                existingWeightedAverageCost = item.purchasePrice,
-                                purchasedQuantity = purchasedQty,
-                                netPurchaseUnitCost = purchaseUnitCost
-                            )
-                            item.copy(
-                                openingStock = openingStockToKeep,
-                                openingCostPrice = openingCostToKeep,
-                                quantity = roundQuantity(item.quantity + purchasedQty),
-                                purchasePrice = newAvco,
-                                purchasedQty = roundQuantity(item.purchasedQty + purchasedQty)
-                            )
-                        } else item
+                    if (targetItemId.isNullOrBlank() || updatedInventory.none { it.id == targetItemId }) {
+                        val nameToFind = if (extractedItemName.isNotBlank() && !extractedItemName.equals("Stock In", ignoreCase = true)) {
+                            extractedItemName
+                        } else null
+
+                        if (nameToFind != null) {
+                            val matchByName = updatedInventory.find { it.name.trim().equals(nameToFind, ignoreCase = true) }
+                            if (matchByName != null) {
+                                targetItemId = matchByName.id
+                            } else {
+                                val unitCostVal = tx.unitCost ?: (amount / purchasedQty)
+                                val newInvItem = InventoryItem(
+                                    id = "item_${System.currentTimeMillis()}",
+                                    name = nameToFind,
+                                    category = tx.category.ifBlank { "General" },
+                                    quantity = 0.0,
+                                    purchasePrice = unitCostVal,
+                                    salePrice = unitCostVal * 1.2,
+                                    unit = "pcs"
+                                )
+                                updatedInventory = updatedInventory + newInvItem
+                                targetItemId = newInvItem.id
+                            }
+                        }
+                    }
+
+                    if (!targetItemId.isNullOrBlank()) {
+                        val purchaseUnitCost = tx.unitCost ?: (if (purchasedQty > 0) amount / purchasedQty else 0.0)
+
+                        updatedInventory = updatedInventory.map { item ->
+                            if (item.id == targetItemId) {
+                                val openingStockToKeep = if (item.openingStock > 0.0) item.openingStock else if (item.purchasedQty == 0.0 && item.soldQty == 0.0) item.quantity else 0.0
+                                val openingCostToKeep = if (item.openingCostPrice > 0.0) item.openingCostPrice else if (item.purchasedQty == 0.0 && item.soldQty == 0.0) item.purchasePrice else item.purchasePrice
+                                val newAvco = calculateAvcoOnPurchase(
+                                    existingQuantity = item.quantity,
+                                    existingWeightedAverageCost = item.purchasePrice,
+                                    purchasedQuantity = purchasedQty,
+                                    netPurchaseUnitCost = purchaseUnitCost
+                                )
+                                item.copy(
+                                    openingStock = openingStockToKeep,
+                                    openingCostPrice = openingCostToKeep,
+                                    quantity = roundQuantity(item.quantity + purchasedQty),
+                                    purchasePrice = newAvco,
+                                    purchasedQty = roundQuantity(item.purchasedQty + purchasedQty)
+                                )
+                            } else item
+                        }
                     }
                 }
             }
