@@ -24,6 +24,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.saleemkhan.myshopmanager.model.*
+import com.saleemkhan.myshopmanager.ui.components.AddInventoryItemDialog
 import com.saleemkhan.myshopmanager.ui.components.BarcodeScannerDialog
 import com.saleemkhan.myshopmanager.ui.components.SaleInventoryItemDialog
 import com.saleemkhan.myshopmanager.ui.theme.*
@@ -435,192 +436,19 @@ fun InventoryScreen(
             }
         }
 
-        // Add Product Dialog (Supports pre-filled barcode)
+        // Add Product Dialog (Fullscreen, Category & Unit LOVs, Camera Barcode Scanner)
         if (showAddDialog) {
-            var name by remember { mutableStateOf("") }
-            var category by remember { mutableStateOf("") }
-            var purchasePrice by remember { mutableStateOf("") }
-            var salePrice by remember { mutableStateOf("") }
-            var qty by remember { mutableStateOf("1") }
-            var unit by remember { mutableStateOf(if (isUrdu) "عدد" else "pcs") }
-            var minAlert by remember { mutableStateOf("5") }
-            var itemBarcode by remember(prefilledBarcode) { mutableStateOf(prefilledBarcode) }
-            var isScanningForField by remember { mutableStateOf(false) }
-
-            Dialog(onDismissRequest = { showAddDialog = false }) {
-                Card(
-                    shape = RoundedCornerShape(24.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color.White),
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 14.dp)
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(18.dp)
-                            .verticalScroll(rememberScrollState()),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = if (isUrdu) "نیا پروڈکٹ درج کریں" else "Add New Inventory Item",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 16.sp,
-                                color = Slate900
-                            )
-                            IconButton(onClick = { showAddDialog = false }, modifier = Modifier.size(28.dp)) {
-                                Icon(Icons.Default.Close, contentDescription = "Close", tint = Slate500)
-                            }
-                        }
-
-                        OutlinedTextField(
-                            value = name,
-                            onValueChange = { name = it },
-                            label = { Text(if (isUrdu) "پروڈکٹ کا نام" else "Product Name") },
-                            singleLine = true,
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        )
-
-                        OutlinedTextField(
-                            value = category,
-                            onValueChange = { category = it },
-                            label = { Text(if (isUrdu) "کیٹگری" else "Category") },
-                            singleLine = true,
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        )
-
-                        // Barcode Field with Scan Camera button
-                        OutlinedTextField(
-                            value = itemBarcode,
-                            onValueChange = { itemBarcode = it },
-                            label = { Text(if (isUrdu) "بارکوڈ / SKU" else "Barcode / SKU") },
-                            placeholder = { Text("e.g. 896400012345") },
-                            singleLine = true,
-                            trailingIcon = {
-                                IconButton(onClick = { isScanningForField = true }) {
-                                    Icon(
-                                        imageVector = Icons.Default.QrCodeScanner,
-                                        contentDescription = "Scan Barcode",
-                                        tint = DukanGreenPrimary,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                }
-                            },
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        )
-
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            OutlinedTextField(
-                                value = purchasePrice,
-                                onValueChange = { purchasePrice = it },
-                                label = { Text(if (isUrdu) "خرید قیمت" else "Cost Price") },
-                                singleLine = true,
-                                shape = RoundedCornerShape(12.dp),
-                                modifier = Modifier.weight(1f)
-                            )
-                            OutlinedTextField(
-                                value = salePrice,
-                                onValueChange = { salePrice = it },
-                                label = { Text(if (isUrdu) "فروخت قیمت" else "Sale Price") },
-                                singleLine = true,
-                                shape = RoundedCornerShape(12.dp),
-                                modifier = Modifier.weight(1f)
-                            )
-                        }
-
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            OutlinedTextField(
-                                value = qty,
-                                onValueChange = { qty = it },
-                                label = { Text(if (isUrdu) "تعداد" else "Qty") },
-                                singleLine = true,
-                                shape = RoundedCornerShape(12.dp),
-                                modifier = Modifier.weight(1f)
-                            )
-                            OutlinedTextField(
-                                value = unit,
-                                onValueChange = { unit = it },
-                                label = { Text(if (isUrdu) "یونٹ" else "Unit") },
-                                singleLine = true,
-                                shape = RoundedCornerShape(12.dp),
-                                modifier = Modifier.weight(1f)
-                            )
-                        }
-
-                        OutlinedTextField(
-                            value = minAlert,
-                            onValueChange = { minAlert = it },
-                            label = { Text(if (isUrdu) "کم اسٹاک الرٹ کی حد" else "Min Stock Alert") },
-                            singleLine = true,
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        )
-
-                        Button(
-                            onClick = {
-                                if (name.isNotBlank()) {
-                                    val cost = purchasePrice.toDoubleOrNull() ?: 0.0
-                                    val sale = salePrice.toDoubleOrNull() ?: 0.0
-                                    val quantity = qty.toDoubleOrNull() ?: 1.0
-                                    val alert = minAlert.toDoubleOrNull() ?: 5.0
-
-                                    onAddItem(
-                                        InventoryItem(
-                                            id = "item_${System.currentTimeMillis()}",
-                                            name = name,
-                                            category = category.ifBlank { "General" },
-                                            quantity = quantity,
-                                            unit = unit,
-                                            purchasePrice = cost,
-                                            salePrice = sale,
-                                            minStockAlert = alert,
-                                            barcode = itemBarcode.ifBlank { null }
-                                        )
-                                    )
-                                    showAddDialog = false
-                                }
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = DukanGreenPrimary),
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.fillMaxWidth().height(44.dp)
-                        ) {
-                            Text(text = if (isUrdu) "پروڈکٹ محفوظ کریں" else "Save Product", fontWeight = FontWeight.Bold)
-                        }
-                    }
-                }
-
-                // If user taps camera icon inside Add Product dialog
-                if (isScanningForField) {
-                    BarcodeScannerDialog(
-                        isOpen = isScanningForField,
-                        onClose = { isScanningForField = false },
-                        inventory = state.inventory,
-                        onItemScanned = { matched ->
-                            itemBarcode = matched.barcode ?: matched.sku ?: ""
-                            if (name.isBlank()) name = matched.name
-                            if (category.isBlank()) category = matched.category
-                            if (purchasePrice.isBlank()) purchasePrice = matched.purchasePrice.toString()
-                            if (salePrice.isBlank()) salePrice = matched.salePrice.toString()
-                            isScanningForField = false
-                        },
-                        onManualCodeEntered = { manualCode ->
-                            itemBarcode = manualCode
-                            isScanningForField = false
-                        },
-                        onAddNewItemWithBarcode = { code ->
-                            itemBarcode = code
-                            isScanningForField = false
-                        },
-                        isUrdu = isUrdu
-                    )
-                }
-            }
+            AddInventoryItemDialog(
+                isOpen = showAddDialog,
+                onClose = {
+                    showAddDialog = false
+                    prefilledBarcode = ""
+                },
+                onAddItem = onAddItem,
+                isUrdu = isUrdu,
+                initialBarcode = prefilledBarcode,
+                inventory = state.inventory
+            )
         }
 
         // Local Barcode Scanner Dialog on Inventory Screen
