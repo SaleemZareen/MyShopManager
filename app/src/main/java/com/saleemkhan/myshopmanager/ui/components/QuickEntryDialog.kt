@@ -16,6 +16,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -4934,59 +4935,103 @@ fun QuickAddItemDialog(
     if (!isOpen) return
 
     var name by remember { mutableStateOf("") }
-    var category by remember { mutableStateOf(existingCategories.firstOrNull() ?: "General") }
+    var category by remember { mutableStateOf("General") }
     var salePrice by remember { mutableStateOf("") }
     var costPrice by remember { mutableStateOf("") }
     var stockQty by remember { mutableStateOf("10") }
-    var unit by remember { mutableStateOf("Piece") }
+    var unit by remember { mutableStateOf("pcs") }
     var barcode by remember { mutableStateOf("") }
     var isCatMenuOpen by remember { mutableStateOf(false) }
     var isUnitMenuOpen by remember { mutableStateOf(false) }
 
-    val units = listOf("Piece", "Kg", "Gram", "Litre", "Packet", "Box", "Dozen", "Meter")
+    val defaultCategories = remember(isUrdu) {
+        listOf(
+            "General" to (if (isUrdu) "جنرل الائڈ (General)" else "General"),
+            "Grocery" to (if (isUrdu) "گروسری / راشن (Grocery)" else "Grocery"),
+            "Beverages" to (if (isUrdu) "مشروبات / کولڈڈرنکس (Beverages)" else "Beverages"),
+            "Snacks & Sweets" to (if (isUrdu) "سنیکس و بسکٹ (Snacks & Sweets)" else "Snacks & Sweets"),
+            "Dairy & Bakery" to (if (isUrdu) "ڈیری و بیکری (Dairy & Bakery)" else "Dairy & Bakery"),
+            "Personal Care" to (if (isUrdu) "صابن و شیمپو (Personal Care)" else "Personal Care"),
+            "Household Cleaning" to (if (isUrdu) "صفائی و ڈٹرجنٹ (Cleaning)" else "Household Cleaning"),
+            "Spices & Pulses" to (if (isUrdu) "دالیں و مسالہ جات (Spices & Pulses)" else "Spices & Pulses"),
+            "Frozen Foods" to (if (isUrdu) "فروزن فوڈز (Frozen Foods)" else "Frozen Foods"),
+            "Stationery" to (if (isUrdu) "اسٹیشنری (Stationery)" else "Stationery"),
+            "Cigarettes & Paan" to (if (isUrdu) "سگریٹ و پان (Cigarettes)" else "Cigarettes")
+        )
+    }
 
-    Dialog(onDismissRequest = onClose) {
+    val allCategoriesList = remember(existingCategories, defaultCategories) {
+        val customList = existingCategories
+            .filter { c -> defaultCategories.none { it.first.equals(c, ignoreCase = true) } }
+            .map { it to it }
+        defaultCategories + customList
+    }
+
+    val unitsList = remember(isUrdu) {
+        listOf(
+            "pcs" to (if (isUrdu) "عدد / پیس (pcs)" else "Piece (pcs)"),
+            "kg" to (if (isUrdu) "کلوگرام (kg)" else "Kg"),
+            "gm" to (if (isUrdu) "گرام (gm)" else "Gram"),
+            "ltr" to (if (isUrdu) "لیٹر (ltr)" else "Litre"),
+            "pkt" to (if (isUrdu) "پیکٹ (pkt)" else "Packet"),
+            "box" to (if (isUrdu) "باکس / ڈبہ (box)" else "Box"),
+            "ctn" to (if (isUrdu) "کارٹن (ctn)" else "Carton"),
+            "bag" to (if (isUrdu) "بوری / بیگ (bag)" else "Bag"),
+            "dz" to (if (isUrdu) "درجن (dz)" else "Dozen"),
+            "m" to (if (isUrdu) "میٹر (m)" else "Meter"),
+            "ft" to (if (isUrdu) "فٹ (ft)" else "Feet")
+        )
+    }
+
+    Dialog(
+        onDismissRequest = onClose,
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false
+        )
+    ) {
         Surface(
-            shape = RoundedCornerShape(20.dp),
             color = Color.White,
-            shadowElevation = 8.dp,
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(8.dp)
+                .fillMaxSize()
+                .background(Color.White)
         ) {
             Column(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(18.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                    .fillMaxSize()
+                    .padding(16.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                // Header
+                // Top Fullscreen Header with Back Button and Close Button
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Box(
-                            modifier = Modifier
-                                .size(36.dp)
-                                .background(DukanGreenLight, CircleShape),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(Icons.Default.AddBusiness, contentDescription = null, tint = DukanGreenHover, modifier = Modifier.size(20.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        IconButton(onClick = onClose) {
+                            Icon(imageVector = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Slate800)
                         }
                         Text(
                             text = if (isUrdu) "نیا پروڈکٹ شامل کریں" else "Add New Item",
+                            fontSize = 18.sp,
                             fontWeight = FontWeight.Bold,
-                            fontSize = 16.sp,
                             color = Slate900
                         )
                     }
 
-                    IconButton(onClick = onClose, modifier = Modifier.size(32.dp)) {
-                        Icon(Icons.Default.Close, contentDescription = "Close", tint = Slate500)
+                    IconButton(onClick = onClose) {
+                        Icon(imageVector = Icons.Default.Close, contentDescription = "Close", tint = Slate500)
                     }
                 }
+
+                HorizontalDivider(color = Slate200)
 
                 // Item Name
                 OutlinedTextField(
@@ -4999,53 +5044,71 @@ fun QuickAddItemDialog(
                     modifier = Modifier.fillMaxWidth()
                 )
 
-                // Category & Unit Row
+                // Category & Unit Row (LOV Dropdowns)
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    // Category Dropdown
+                    // Category Dropdown LOV
                     ExposedDropdownMenuBox(
                         expanded = isCatMenuOpen,
                         onExpandedChange = { isCatMenuOpen = !isCatMenuOpen },
                         modifier = Modifier.weight(1f)
                     ) {
                         OutlinedTextField(
-                            value = category,
+                            value = allCategoriesList.find { it.first.equals(category, ignoreCase = true) }?.second ?: category,
                             onValueChange = { category = it },
                             label = { Text(if (isUrdu) "کیٹیگری" else "Category") },
                             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = isCatMenuOpen) },
                             singleLine = true,
                             shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.menuAnchor().fillMaxWidth()
+                            colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors(),
+                            modifier = Modifier
+                                .menuAnchor(MenuAnchorType.PrimaryNotEditable, true)
+                                .fillMaxWidth()
                         )
-                        ExposedDropdownMenu(expanded = isCatMenuOpen, onDismissRequest = { isCatMenuOpen = false }) {
-                            existingCategories.forEach { cat ->
+                        ExposedDropdownMenu(
+                            expanded = isCatMenuOpen,
+                            onDismissRequest = { isCatMenuOpen = false }
+                        ) {
+                            allCategoriesList.forEach { (catKey, catLabel) ->
                                 DropdownMenuItem(
-                                    text = { Text(cat) },
-                                    onClick = { category = cat; isCatMenuOpen = false }
+                                    text = { Text(catLabel, fontSize = 13.sp, fontWeight = if (category == catKey) FontWeight.Bold else FontWeight.Normal) },
+                                    onClick = {
+                                        category = catKey
+                                        isCatMenuOpen = false
+                                    }
                                 )
                             }
                         }
                     }
 
-                    // Unit Dropdown
+                    // Unit Dropdown LOV
                     ExposedDropdownMenuBox(
                         expanded = isUnitMenuOpen,
                         onExpandedChange = { isUnitMenuOpen = !isUnitMenuOpen },
                         modifier = Modifier.weight(1f)
                     ) {
                         OutlinedTextField(
-                            value = unit,
+                            value = unitsList.find { it.first.equals(unit, ignoreCase = true) }?.second ?: unit,
                             onValueChange = { unit = it },
-                            label = { Text(if (isUrdu) "اکائی" else "Unit") },
+                            label = { Text(if (isUrdu) "اکائی / یونٹ" else "Unit") },
                             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = isUnitMenuOpen) },
                             singleLine = true,
                             shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.menuAnchor().fillMaxWidth()
+                            colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors(),
+                            modifier = Modifier
+                                .menuAnchor(MenuAnchorType.PrimaryNotEditable, true)
+                                .fillMaxWidth()
                         )
-                        ExposedDropdownMenu(expanded = isUnitMenuOpen, onDismissRequest = { isUnitMenuOpen = false }) {
-                            units.forEach { u ->
+                        ExposedDropdownMenu(
+                            expanded = isUnitMenuOpen,
+                            onDismissRequest = { isUnitMenuOpen = false }
+                        ) {
+                            unitsList.forEach { (unitKey, unitLabel) ->
                                 DropdownMenuItem(
-                                    text = { Text(u) },
-                                    onClick = { unit = u; isUnitMenuOpen = false }
+                                    text = { Text(unitLabel, fontSize = 13.sp, fontWeight = if (unit == unitKey) FontWeight.Bold else FontWeight.Normal) },
+                                    onClick = {
+                                        unit = unitKey
+                                        isUnitMenuOpen = false
+                                    }
                                 )
                             }
                         }
@@ -5068,7 +5131,7 @@ fun QuickAddItemDialog(
                     OutlinedTextField(
                         value = costPrice,
                         onValueChange = { costPrice = it },
-                        label = { Text(if (isUrdu) "قیمت خرید" else "Cost Price") },
+                        label = { Text(if (isUrdu) "قیمت خرید (Rs.)" else "Cost Price") },
                         placeholder = { Text("0") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         singleLine = true,
@@ -5099,7 +5162,7 @@ fun QuickAddItemDialog(
                     )
                 }
 
-                Spacer(modifier = Modifier.height(4.dp))
+                Spacer(modifier = Modifier.height(12.dp))
 
                 // Actions
                 Row(
@@ -5109,7 +5172,7 @@ fun QuickAddItemDialog(
                     OutlinedButton(
                         onClick = onClose,
                         shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.weight(1f).height(46.dp)
+                        modifier = Modifier.weight(1f).height(48.dp)
                     ) {
                         Text(if (isUrdu) "منسوخ" else "Cancel", color = Slate600)
                     }
@@ -5129,7 +5192,7 @@ fun QuickAddItemDialog(
                                 purchasePrice = cp,
                                 salePrice = sp,
                                 quantity = sq,
-                                unit = unit.ifBlank { "Piece" },
+                                unit = unit.ifBlank { "pcs" },
                                 barcode = barcode.ifBlank { null },
                                 minStockAlert = 5.0
                             )
@@ -5137,7 +5200,7 @@ fun QuickAddItemDialog(
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = DukanGreenPrimary),
                         shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.weight(1f).height(46.dp)
+                        modifier = Modifier.weight(1.5f).height(48.dp)
                     ) {
                         Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(6.dp))

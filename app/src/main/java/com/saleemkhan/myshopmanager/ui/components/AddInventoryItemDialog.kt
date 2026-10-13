@@ -1,10 +1,12 @@
 package com.saleemkhan.myshopmanager.ui.components
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -15,6 +17,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.saleemkhan.myshopmanager.model.InventoryItem
 import com.saleemkhan.myshopmanager.ui.theme.*
 
@@ -82,43 +85,61 @@ fun AddInventoryItemDialog(
         )
     }
 
-    Dialog(onDismissRequest = onClose) {
-        Card(
-            shape = RoundedCornerShape(24.dp),
-            colors = CardDefaults.cardColors(containerColor = Color.White),
+    Dialog(
+        onDismissRequest = onClose,
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false
+        )
+    ) {
+        Surface(
+            color = Color.White,
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(14.dp)
+                .fillMaxSize()
+                .background(Color.White)
         ) {
             Column(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(18.dp)
+                    .fillMaxSize()
+                    .padding(16.dp)
                     .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                // Header
+                // Top Fullscreen Header with Back Button and Close Button
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = if (isUrdu) "نیا اسٹاک آئٹم شامل کریں" else "Add New Inventory Item",
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Slate900
-                    )
-                    IconButton(onClick = onClose, modifier = Modifier.size(28.dp)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        IconButton(onClick = onClose) {
+                            Icon(imageVector = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Slate800)
+                        }
+                        Text(
+                            text = if (isUrdu) "نیا اسٹاک آئٹم شامل کریں" else "Add New Inventory Item",
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Slate900
+                        )
+                    }
+
+                    IconButton(onClick = onClose) {
                         Icon(imageVector = Icons.Default.Close, contentDescription = "Close", tint = Slate500)
                     }
                 }
 
-                // Item Name
+                HorizontalDivider(color = Slate200)
+
+                // Product / Item Name
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
-                    label = { Text(if (isUrdu) "پروڈکٹ کا نام" else "Product / Item Name") },
+                    label = { Text(if (isUrdu) "پروڈکٹ کا نام *" else "Product / Item Name *") },
                     placeholder = { Text("e.g. Basmati Rice 5kg") },
                     singleLine = true,
                     shape = RoundedCornerShape(12.dp),
@@ -195,7 +216,7 @@ fun AddInventoryItemDialog(
                     OutlinedTextField(
                         value = costPrice,
                         onValueChange = { costPrice = it },
-                        label = { Text(if (isUrdu) "خرید قیمت" else "Cost Price") },
+                        label = { Text(if (isUrdu) "خرید قیمت (Rs.)" else "Cost Price (Rs.)") },
                         singleLine = true,
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.weight(1f)
@@ -203,7 +224,7 @@ fun AddInventoryItemDialog(
                     OutlinedTextField(
                         value = sellingPrice,
                         onValueChange = { sellingPrice = it },
-                        label = { Text(if (isUrdu) "فروخت قیمت" else "Sale Price") },
+                        label = { Text(if (isUrdu) "فروخت قیمت (Rs.)" else "Sale Price (Rs.)") },
                         singleLine = true,
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.weight(1f)
@@ -270,7 +291,9 @@ fun AddInventoryItemDialog(
                     modifier = Modifier.fillMaxWidth()
                 )
 
-                // Add to Inventory Button
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Add to Inventory Action Button
                 Button(
                     onClick = {
                         if (name.isNotBlank()) {
@@ -293,12 +316,14 @@ fun AddInventoryItemDialog(
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(44.dp)
+                        .height(48.dp)
                 ) {
+                    Icon(imageVector = Icons.Default.Check, contentDescription = null, modifier = Modifier.size(20.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
                     Text(
                         text = if (isUrdu) "اسٹاک میں شامل کریں" else "Add to Inventory",
                         fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp
+                        fontSize = 15.sp
                     )
                 }
             }
