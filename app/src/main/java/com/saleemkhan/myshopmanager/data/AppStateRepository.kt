@@ -27,6 +27,8 @@ class AppStateRepository private constructor(context: Context) {
         private const val DISMISSED_NOTIFS_KEY = "my_shop_dismissed_notifs"
         private const val PERMISSIONS_SETUP_DONE_KEY = "permissions_setup_done"
         private const val DB_MIGRATED_KEY = "sqlite_db_migrated_v1"
+        private const val WELCOME_INTRO_SHOWN_KEY = "welcome_intro_shown"
+        private const val ONBOARDING_CARD_DISMISSED_KEY = "onboarding_card_dismissed"
 
         @Volatile
         private var INSTANCE: AppStateRepository? = null
@@ -71,6 +73,22 @@ class AppStateRepository private constructor(context: Context) {
 
     fun setPermissionsSetupDone(done: Boolean) {
         prefs.edit().putBoolean(PERMISSIONS_SETUP_DONE_KEY, done).apply()
+    }
+
+    fun isWelcomeIntroShown(): Boolean {
+        return prefs.getBoolean(WELCOME_INTRO_SHOWN_KEY, false)
+    }
+
+    fun setWelcomeIntroShown(shown: Boolean) {
+        prefs.edit().putBoolean(WELCOME_INTRO_SHOWN_KEY, shown).apply()
+    }
+
+    fun isOnboardingCardDismissed(): Boolean {
+        return prefs.getBoolean(ONBOARDING_CARD_DISMISSED_KEY, false)
+    }
+
+    fun setOnboardingCardDismissed(dismissed: Boolean) {
+        prefs.edit().putBoolean(ONBOARDING_CARD_DISMISSED_KEY, dismissed).apply()
     }
 
     private fun loadState(): AppState {

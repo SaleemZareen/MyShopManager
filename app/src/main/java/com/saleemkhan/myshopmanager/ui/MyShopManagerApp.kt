@@ -35,6 +35,8 @@ fun MyShopManagerApp() {
     var isQuickEntryOpen by remember { mutableStateOf(false) }
 
     // Dialog & Overlay states
+    var isWelcomeIntroOpen by remember { mutableStateOf(!repository.isWelcomeIntroShown()) }
+    var isOnboardingCardDismissed by remember { mutableStateOf(repository.isOnboardingCardDismissed()) }
     var isLocked by remember { mutableStateOf(appState.profile.securityPin.isNotBlank() || !appState.profile.passwordCode.isNullOrBlank() || appState.profile.biometricsEnabled) }
     var isPermissionsSetupOpen by remember { mutableStateOf(!repository.isPermissionsSetupDone()) }
     var isVoiceEntryOpen by remember { mutableStateOf(false) }
@@ -262,7 +264,15 @@ fun MyShopManagerApp() {
                                             onOpenCalendar = { isCalendarOpen = true },
                                             onOpenGraphs = { isGraphsModalOpen = true },
                                             onOpenAi = { isAiOpen = true },
-                                            onOpenCashAccounts = { isCashAccountsOpen = true }
+                                            onOpenCashAccounts = { isCashAccountsOpen = true },
+                                            isOnboardingCardVisible = !isOnboardingCardDismissed,
+                                            onOpenSettings = { navigateTo(Screen.SETTINGS) },
+                                            onOpenAddInventory = { isAddInventoryDialogOpen = true },
+                                            onOpenKhata = { navigateTo(Screen.KHATA) },
+                                            onDismissOnboardingCard = {
+                                                isOnboardingCardDismissed = true
+                                                repository.setOnboardingCardDismissed(true)
+                                            }
                                         )
                                     }
                             Screen.TRANSACTIONS -> {
@@ -803,6 +813,24 @@ fun MyShopManagerApp() {
                                 onFinish = {
                                     repository.setPermissionsSetupDone(true)
                                     isPermissionsSetupOpen = false
+                                },
+                                isUrdu = isUrdu
+                            )
+                        }
+
+                        // Welcome Intro Dialog (First launch onboarding tutorial)
+                        if (isWelcomeIntroOpen) {
+                            WelcomeIntroDialog(
+                                isOpen = isWelcomeIntroOpen,
+                                onClose = {
+                                    isWelcomeIntroOpen = false
+                                    repository.setWelcomeIntroShown(true)
+                                },
+                                onStartSetup = {
+                                    isWelcomeIntroOpen = false
+                                    repository.setWelcomeIntroShown(true)
+                                    isOnboardingCardDismissed = false
+                                    repository.setOnboardingCardDismissed(false)
                                 },
                                 isUrdu = isUrdu
                             )

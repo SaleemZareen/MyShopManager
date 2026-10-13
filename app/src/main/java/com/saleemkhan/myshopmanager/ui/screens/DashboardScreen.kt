@@ -32,6 +32,7 @@ import androidx.compose.ui.unit.sp
 import com.saleemkhan.myshopmanager.R
 import com.saleemkhan.myshopmanager.model.*
 import com.saleemkhan.myshopmanager.ui.components.AutoScrollText
+import com.saleemkhan.myshopmanager.ui.components.OnboardingSetupCard
 import com.saleemkhan.myshopmanager.ui.theme.*
 import com.saleemkhan.myshopmanager.utils.FormatUtils
 import com.saleemkhan.myshopmanager.utils.TaxEngine
@@ -43,13 +44,18 @@ fun DashboardScreen(
     state: AppState,
     isUrdu: Boolean,
     header: (@Composable () -> Unit)? = null,
+    isOnboardingCardVisible: Boolean = false,
     onOpenQuickEntry: (TransactionType) -> Unit,
     onOpenVoiceEntry: () -> Unit,
     onNavigateScreen: (Screen) -> Unit,
     onOpenCalendar: () -> Unit,
     onOpenGraphs: () -> Unit,
     onOpenAi: () -> Unit,
-    onOpenCashAccounts: () -> Unit
+    onOpenCashAccounts: () -> Unit,
+    onOpenSettings: () -> Unit = {},
+    onOpenAddInventory: () -> Unit = {},
+    onOpenKhata: () -> Unit = {},
+    onDismissOnboardingCard: () -> Unit = {}
 ) {
     val taxSummary = remember(state) { TaxEngine.calculateFbrSummary(state) }
 
@@ -90,6 +96,22 @@ fun DashboardScreen(
         if (header != null) {
             item {
                 header()
+            }
+        }
+
+        if (isOnboardingCardVisible) {
+            item {
+                Box(modifier = Modifier.padding(horizontal = 12.dp)) {
+                    OnboardingSetupCard(
+                        state = state,
+                        isUrdu = isUrdu,
+                        onOpenSettings = onOpenSettings,
+                        onOpenCashAccounts = onOpenCashAccounts,
+                        onOpenAddInventory = onOpenAddInventory,
+                        onOpenKhata = onOpenKhata,
+                        onDismiss = onDismissOnboardingCard
+                    )
+                }
             }
         }
 
