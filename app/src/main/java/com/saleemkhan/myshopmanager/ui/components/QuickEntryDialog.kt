@@ -507,7 +507,7 @@ fun QuickEntryDialog(
                         modifier = Modifier
                             .fillMaxSize()
                             .verticalScroll(rememberScrollState())
-                            .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 96.dp),
+                            .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 120.dp),
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
                         if (activeTabId == "ANALYTICS") {
@@ -714,13 +714,14 @@ fun QuickEntryDialog(
                             .align(Alignment.BottomCenter)
                             .fillMaxWidth(),
                         color = Color.White,
-                        shadowElevation = 8.dp,
+                        shadowElevation = 12.dp,
                         border = BorderStroke(1.dp, Slate200)
                     ) {
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(16.dp)
+                                .navigationBarsPadding()
+                                .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 28.dp)
                         ) {
                             when (activeType) {
                                 TransactionType.SALE -> {
