@@ -63,7 +63,9 @@ fun DashboardScreen(
     val todayIso = remember { FormatUtils.getTodayIsoDate() }
     val todayTransactions = remember(state.transactions, todayIso) {
         state.transactions.filter { t ->
-            t.date.startsWith(todayIso)
+            val cleanDate = t.date.trim()
+            cleanDate.startsWith(todayIso) ||
+                    (cleanDate.isNotBlank() && FormatUtils.formatDisplayDate(cleanDate) == FormatUtils.formatDisplayDate(todayIso))
         }
     }
 

@@ -850,4 +850,115 @@ class AccountingEngineTest {
         assertEquals(50.0, i2.purchasePrice, 0.001)
         assertEquals(4, mergedState.transactions.size)
     }
+
+    @Test
+    fun testCreditPurchaseWithNewSupplierAutoCreationAndPayables() {
+        val bank = BankAccount(id = "b1", type = "CASH", balance = 10000.0)
+        val initialState = AppState(bankAccounts = listOf(bank), suppliers = emptyList())
+
+        val creditPurchaseTx = Transaction(
+            id = "tx_pur_new_supp",
+            type = TransactionType.PURCHASE,
+            amount = 15000.0,
+            paymentMethod = PaymentMethod.CREDIT,
+            partyName = "Al-Madina Traders",
+            date = "2026-10-13"
+        )
+
+        val stateAfter = AccountingEngine.applyTransaction(initialState, creditPurchaseTx)
+        assertEquals(1, stateAfter.suppliers.size)
+        val createdSupplier = stateAfter.suppliers.first()
+        assertEquals("Al-Madina Traders", createdSupplier.name)
+        assertEquals(15000.0, createdSupplier.totalPayable, 0.001)
+        assertEquals(10000.0, stateAfter.bankAccounts.first().balance, 0.001)
+        assertEquals(15000.0, AccountingEngine.calculateBalanceSheet(stateAfter).supplierPayables, 0.001)
+    }
+
+    @Test
+    fun testCreditSaleWithNewCustomerAutoCreationAndReceivables() {
+        val initialState = AppState(customers = emptyList())
+
+        val creditSaleTx = Transaction(
+            id = "tx_sale_new_cust",
+            type = TransactionType.SALE,
+            amount = 8000.0,
+            paymentMethod = PaymentMethod.CREDIT,
+            partyName = "Kamran Khan",
+            date = "2026-10-13"
+        )
+
+        val stateAfter = AccountingEngine.applyTransaction(initialState, creditSaleTx)
+        assertEquals(1, stateAfter.customers.size)
+        val createdCust = stateAfter.customers.first()
+        assertEquals("Kamran Khan", createdCust.name)
+        assertEquals(8000.0, createdCust.totalCredit, 0.001)
+        assertEquals(8000.0, AccountingEngine.calculateBalanceSheet(stateAfter).customerReceivables, 0.001)
+    }
+
+    @Test
+    fun testSupplierAndCustomerMatchingCaseInsensitiveAndWhitespace() {
+        val supp = SupplierParty(id = "s1", name = "National Foods", totalPayable = 2000.0)
+        val cust = CustomerParty(id = "c1", name = "Zahid Mahmood", totalCredit = 1000.0)
+        val initialState = AppState(suppliers = listOf(supp), customers = listOf(cust))
+
+        val txSupp = Transaction(
+            id = "tx_s_case",
+            type = TransactionType.PURCHASE,
+            amount = 1000.0,
+            paymentMethod = PaymentMethod.CREDIT,
+            partyName = "  national foods  "
+        )
+        val txCust = Transaction(
+            id = "tx_c_case",
+            type = TransactionType.SALE,
+            amount = 500.0,
+            paymentMethod = PaymentMethod.CREDIT,
+            partyName = "zahid mahmood"
+        )
+
+        var state = AccountingEngine.applyTransaction(initialState, txSupp)
+        state = AccountingEngine.applyTransaction(state, txCust)
+
+        assertEquals(1, state.suppliers.size)
+        assertEquals(1, state.customers.size)
+        assertEquals(3000.0, state.suppliers.first().totalPayable, 0.001)
+        assertEquals(1500.0, state.customers.first().totalCredit, 0.001)
+    }
+
+    @Test
+    fun testPartialCreditPurchaseAccounting() {
+        val bank = BankAccount(id = "b_cash", type = "CASH", balance = 20000.0)
+        val item = InventoryItem(id = "item_p", name = "Wheat Flour 10kg", quantity = 10.0, purchasePrice = 500.0)
+        val initialState = AppState(
+            bankAccounts = listOf(bank),
+            inventory = listOf(item),
+            suppliers = emptyList()
+        )
+
+        val partialPurchaseTx = Transaction(
+            id = "tx_part_pur",
+            type = TransactionType.PURCHASE,
+            amount = 10000.0,
+            paymentMethod = PaymentMethod.CREDIT,
+            partyName = "Lahore Flour Mills",
+            accountId = "b_cash",
+            itemId = "item_p",
+            qtyChange = 10.0,
+            unitCost = 1000.0,
+            cashPaid = 3000.0
+        )
+
+        val stateAfter = AccountingEngine.applyTransaction(initialState, partialPurchaseTx)
+
+        assertEquals(17000.0, stateAfter.bankAccounts.first().balance, 0.001)
+        assertEquals(1, stateAfter.suppliers.size)
+        assertEquals("Lahore Flour Mills", stateAfter.suppliers.first().name)
+        assertEquals(7000.0, stateAfter.suppliers.first().totalPayable, 0.001)
+
+        val updatedItem = stateAfter.inventory.first()
+        assertEquals(20.0, updatedItem.quantity, 0.001)
+
+        val bs = AccountingEngine.calculateBalanceSheet(stateAfter)
+        assertTrue(bs.isBalanced)
+    }
 }

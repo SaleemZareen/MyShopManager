@@ -148,7 +148,8 @@ class MyShopDatabase private constructor(context: Context) : SQLiteOpenHelper(
                 toAccountId TEXT,
                 isCogsEstimated INTEGER,
                 isCogsMissing INTEGER,
-                legacyClassification TEXT
+                legacyClassification TEXT,
+                cashPaid REAL
             )
             """.trimIndent()
         )
@@ -179,7 +180,8 @@ class MyShopDatabase private constructor(context: Context) : SQLiteOpenHelper(
                 toAccountId TEXT,
                 isCogsEstimated INTEGER,
                 isCogsMissing INTEGER,
-                legacyClassification TEXT
+                legacyClassification TEXT,
+                cashPaid REAL
             )
             """.trimIndent()
         )
@@ -277,7 +279,8 @@ class MyShopDatabase private constructor(context: Context) : SQLiteOpenHelper(
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        // Upgrade migrations if needed
+        try { db.execSQL("ALTER TABLE transactions ADD COLUMN cashPaid REAL") } catch (_: Exception) {}
+        try { db.execSQL("ALTER TABLE deleted_transactions ADD COLUMN cashPaid REAL") } catch (_: Exception) {}
     }
 
     fun saveAppStateAtomic(state: AppState): Boolean {
@@ -506,6 +509,7 @@ class MyShopDatabase private constructor(context: Context) : SQLiteOpenHelper(
             put("isCogsEstimated", if (tx.isCogsEstimated) 1 else 0)
             put("isCogsMissing", if (tx.isCogsMissing) 1 else 0)
             put("legacyClassification", tx.legacyClassification)
+            put("cashPaid", tx.cashPaid)
         }
         db.insert(table, null, cv)
     }
@@ -723,7 +727,11 @@ class MyShopDatabase private constructor(context: Context) : SQLiteOpenHelper(
                         toAccountId = it.getString(it.getColumnIndexOrThrow("toAccountId")),
                         isCogsEstimated = it.getInt(it.getColumnIndexOrThrow("isCogsEstimated")) == 1,
                         isCogsMissing = it.getInt(it.getColumnIndexOrThrow("isCogsMissing")) == 1,
-                        legacyClassification = it.getString(it.getColumnIndexOrThrow("legacyClassification"))
+                        legacyClassification = it.getString(it.getColumnIndexOrThrow("legacyClassification")),
+                        cashPaid = run {
+                            val idx = it.getColumnIndex("cashPaid")
+                            if (idx != -1 && !it.isNull(idx)) it.getDouble(idx) else null
+                        }
                     )
                 )
             }

@@ -2,6 +2,7 @@ package com.saleemkhan.myshopmanager.data.accounting
 
 import com.saleemkhan.myshopmanager.model.*
 import com.saleemkhan.myshopmanager.ui.screens.TransactionDateFilter
+import com.saleemkhan.myshopmanager.utils.FormatUtils
 import java.text.SimpleDateFormat
 import java.util.*
 import kotlin.math.roundToLong
@@ -178,12 +179,44 @@ object AccountingEngine {
             TransactionType.SALE -> {
                 // 1. Liquidity or Receivable
                 if (tx.paymentMethod == PaymentMethod.CREDIT) {
-                    // CREDIT sale: customer receivable increases, cash does NOT increase
-                    val partyId = resolvePartyId(tx, state.customers, state.suppliers)
-                    updatedCustomers = updatedCustomers.map { c ->
-                        val isMatch = (partyId != null && c.id == partyId) ||
-                                (partyId == null && !tx.partyName.isNullOrBlank() && c.name.equals(tx.partyName, ignoreCase = true))
-                        if (isMatch) c.copy(totalCredit = roundMoney(c.totalCredit + amount)) else c
+                    val partyNameClean = tx.partyName?.trim() ?: ""
+                    val resolvedCustId = resolvePartyId(tx, updatedCustomers, updatedSuppliers)
+                    val isWalkIn = resolvedCustId.isNullOrBlank() && (
+                            partyNameClean.isBlank() ||
+                            partyNameClean.equals("Counter Cash Customer", ignoreCase = true) ||
+                            partyNameClean.equals("کاؤنٹر نقد کسٹمر", ignoreCase = true) ||
+                            partyNameClean.equals("Walk-in Customer", ignoreCase = true)
+                    )
+
+                    if (!isWalkIn) {
+                        val existingCust = updatedCustomers.find { c ->
+                            (resolvedCustId != null && c.id == resolvedCustId) ||
+                                    (partyNameClean.isNotBlank() && c.name.trim().equals(partyNameClean, ignoreCase = true))
+                        }
+
+                        val activeCustId = if (existingCust != null) {
+                            existingCust.id
+                        } else {
+                            val newCustId = tx.partyId?.ifBlank { null } ?: "cust_${System.currentTimeMillis()}"
+                            val newCustomer = CustomerParty(
+                                id = newCustId,
+                                name = if (partyNameClean.isNotBlank()) partyNameClean else "Khata Customer",
+                                phone = "",
+                                totalCredit = 0.0,
+                                status = "ACTIVE"
+                            )
+                            updatedCustomers = updatedCustomers + newCustomer
+                            newCustId
+                        }
+
+                        updatedCustomers = updatedCustomers.map { c ->
+                            if (c.id == activeCustId) {
+                                c.copy(
+                                    totalCredit = roundMoney(c.totalCredit + amount),
+                                    lastTransactionDate = tx.date.ifBlank { FormatUtils.getTodayIsoDate() }
+                                )
+                            } else c
+                        }
                     }
                 } else {
                     // CASH / BANK / WALLET sale: account balance increases
@@ -210,26 +243,62 @@ object AccountingEngine {
             }
 
             TransactionType.PURCHASE -> {
-                // 1. Liquidity or Payable
-                if (tx.paymentMethod == PaymentMethod.CREDIT) {
-                    // CREDIT purchase: supplier payable increases, cash does NOT decrease
-                    val partyId = resolvePartyId(tx, state.customers, state.suppliers)
-                    updatedSuppliers = updatedSuppliers.map { s ->
-                        val isMatch = (partyId != null && s.id == partyId) ||
-                                (partyId == null && !tx.partyName.isNullOrBlank() && s.name.equals(tx.partyName, ignoreCase = true))
-                        if (isMatch) s.copy(totalPayable = roundMoney(s.totalPayable + amount)) else s
-                    }
-                } else {
-                    // CASH / BANK / WALLET purchase: account balance decreases
+                val cashToDeduct = roundMoney(tx.cashPaid ?: (if (tx.paymentMethod == PaymentMethod.CREDIT) 0.0 else amount))
+                val payableToIncrease = roundMoney((amount - cashToDeduct).coerceAtLeast(0.0))
+
+                // 1. Cash / Liquidity Deduction
+                if (cashToDeduct > 0.0) {
                     val targetAcc = findTargetAccount(updatedBankAccounts, tx.accountId, tx.paymentMethod)
                     if (targetAcc != null) {
                         updatedBankAccounts = updatedBankAccounts.map { acc ->
-                            if (acc.id == targetAcc.id) acc.copy(balance = roundMoney(acc.balance - amount)) else acc
+                            if (acc.id == targetAcc.id) acc.copy(balance = roundMoney(acc.balance - cashToDeduct)) else acc
                         }
                     }
                 }
 
-                // 2. Inventory addition & AVCO recalculation
+                // 2. Supplier Credit Payable
+                if (payableToIncrease > 0.0 || tx.paymentMethod == PaymentMethod.CREDIT) {
+                    val partyNameClean = tx.partyName?.trim() ?: ""
+                    val resolvedSuppId = resolvePartyId(tx, updatedCustomers, updatedSuppliers)
+                    val isGenericSupplier = resolvedSuppId.isNullOrBlank() && (
+                            partyNameClean.isBlank() ||
+                            partyNameClean.equals("Supplier", ignoreCase = true) ||
+                            partyNameClean.equals("سپلائر", ignoreCase = true)
+                    )
+
+                    if (!isGenericSupplier) {
+                        val existingSupp = updatedSuppliers.find { s ->
+                            (resolvedSuppId != null && s.id == resolvedSuppId) ||
+                                    (partyNameClean.isNotBlank() && s.name.trim().equals(partyNameClean, ignoreCase = true))
+                        }
+
+                        val activeSuppId = if (existingSupp != null) {
+                            existingSupp.id
+                        } else {
+                            val newSuppId = tx.partyId?.ifBlank { null } ?: "supp_${System.currentTimeMillis()}"
+                            val newSupplier = SupplierParty(
+                                id = newSuppId,
+                                name = if (partyNameClean.isNotBlank()) partyNameClean else "Supplier",
+                                phone = "",
+                                totalPayable = 0.0,
+                                status = "ACTIVE"
+                            )
+                            updatedSuppliers = updatedSuppliers + newSupplier
+                            newSuppId
+                        }
+
+                        updatedSuppliers = updatedSuppliers.map { s ->
+                            if (s.id == activeSuppId) {
+                                s.copy(
+                                    totalPayable = roundMoney(s.totalPayable + payableToIncrease),
+                                    dueDate = tx.date.ifBlank { FormatUtils.getTodayIsoDate() }
+                                )
+                            } else s
+                        }
+                    }
+                }
+
+                // 3. Inventory addition & AVCO recalculation
                 if (!tx.itemId.isNullOrBlank() && tx.qtyChange != null && tx.qtyChange > 0.0) {
                     val purchasedQty = tx.qtyChange
                     val purchaseUnitCost = tx.unitCost ?: (if (purchasedQty > 0) amount / purchasedQty else 0.0)
@@ -273,11 +342,33 @@ object AccountingEngine {
                         if (acc.id == targetAcc.id) acc.copy(balance = roundMoney(acc.balance + amount)) else acc
                     }
                 }
-                val partyId = resolvePartyId(tx, state.customers, state.suppliers)
-                updatedCustomers = updatedCustomers.map { c ->
-                    val isMatch = (partyId != null && c.id == partyId) ||
-                            (partyId == null && !tx.partyName.isNullOrBlank() && c.name.equals(tx.partyName, ignoreCase = true))
-                    if (isMatch) c.copy(totalCredit = roundMoney(c.totalCredit - amount)) else c
+
+                val partyNameClean = tx.partyName?.trim() ?: ""
+                val resolvedCustId = resolvePartyId(tx, updatedCustomers, updatedSuppliers)
+                val existingCust = updatedCustomers.find { c ->
+                    (resolvedCustId != null && c.id == resolvedCustId) ||
+                            (partyNameClean.isNotBlank() && c.name.trim().equals(partyNameClean, ignoreCase = true))
+                }
+
+                val activeCustId = if (existingCust != null) {
+                    existingCust.id
+                } else if (partyNameClean.isNotBlank()) {
+                    val newCustId = tx.partyId?.ifBlank { null } ?: "cust_${System.currentTimeMillis()}"
+                    val newCustomer = CustomerParty(
+                        id = newCustId,
+                        name = partyNameClean,
+                        phone = "",
+                        totalCredit = 0.0,
+                        status = "ACTIVE"
+                    )
+                    updatedCustomers = updatedCustomers + newCustomer
+                    newCustId
+                } else null
+
+                if (activeCustId != null) {
+                    updatedCustomers = updatedCustomers.map { c ->
+                        if (c.id == activeCustId) c.copy(totalCredit = roundMoney(c.totalCredit - amount)) else c
+                    }
                 }
             }
 
@@ -289,11 +380,33 @@ object AccountingEngine {
                         if (acc.id == targetAcc.id) acc.copy(balance = roundMoney(acc.balance - amount)) else acc
                     }
                 }
-                val partyId = resolvePartyId(tx, state.customers, state.suppliers)
-                updatedSuppliers = updatedSuppliers.map { s ->
-                    val isMatch = (partyId != null && s.id == partyId) ||
-                            (partyId == null && !tx.partyName.isNullOrBlank() && s.name.equals(tx.partyName, ignoreCase = true))
-                    if (isMatch) s.copy(totalPayable = roundMoney(s.totalPayable - amount)) else s
+
+                val partyNameClean = tx.partyName?.trim() ?: ""
+                val resolvedSuppId = resolvePartyId(tx, updatedCustomers, updatedSuppliers)
+                val existingSupp = updatedSuppliers.find { s ->
+                    (resolvedSuppId != null && s.id == resolvedSuppId) ||
+                            (partyNameClean.isNotBlank() && s.name.trim().equals(partyNameClean, ignoreCase = true))
+                }
+
+                val activeSuppId = if (existingSupp != null) {
+                    existingSupp.id
+                } else if (partyNameClean.isNotBlank()) {
+                    val newSuppId = tx.partyId?.ifBlank { null } ?: "supp_${System.currentTimeMillis()}"
+                    val newSupplier = SupplierParty(
+                        id = newSuppId,
+                        name = partyNameClean,
+                        phone = "",
+                        totalPayable = 0.0,
+                        status = "ACTIVE"
+                    )
+                    updatedSuppliers = updatedSuppliers + newSupplier
+                    newSuppId
+                } else null
+
+                if (activeSuppId != null) {
+                    updatedSuppliers = updatedSuppliers.map { s ->
+                        if (s.id == activeSuppId) s.copy(totalPayable = roundMoney(s.totalPayable - amount)) else s
+                    }
                 }
             }
 

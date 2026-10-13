@@ -102,7 +102,8 @@ data class Transaction(
     val toAccountId: String? = null,
     val isCogsEstimated: Boolean = false,
     val isCogsMissing: Boolean = false,
-    val legacyClassification: String? = null
+    val legacyClassification: String? = null,
+    val cashPaid: Double? = null
 )
 
 data class InventoryItem(

@@ -881,8 +881,7 @@ fun QuickEntryDialog(
                                             val actualPaymentMethod = when (purchasePaymentTerm) {
                                                 "PAID_CASH" -> PaymentMethod.CASH
                                                 "PAID_BANK" -> PaymentMethod.BANK
-                                                "FULL_CREDIT" -> PaymentMethod.CREDIT
-                                                "PARTIAL_CREDIT" -> if (paidAmt > 0) PaymentMethod.CASH else PaymentMethod.CREDIT
+                                                "FULL_CREDIT", "PARTIAL_CREDIT" -> PaymentMethod.CREDIT
                                                 else -> PaymentMethod.CASH
                                             }
 
@@ -902,7 +901,7 @@ fun QuickEntryDialog(
                                             val newTx = Transaction(
                                                 id = editingTransaction?.id ?: "tx_${System.currentTimeMillis()}",
                                                 type = TransactionType.PURCHASE,
-                                                amount = if (purchasePaymentTerm == "PARTIAL_CREDIT" && paidAmt > 0) paidAmt else totalCost,
+                                                amount = totalCost,
                                                 category = item?.category ?: "Purchase",
                                                 paymentMethod = actualPaymentMethod,
                                                 partyName = party,
@@ -913,7 +912,8 @@ fun QuickEntryDialog(
                                                 qtyChange = qty,
                                                 unitCost = netPurchaseUnitCost,
                                                 totalValueChange = totalCost,
-                                                accountId = finalTargetAccId
+                                                accountId = finalTargetAccId,
+                                                cashPaid = if (purchasePaymentTerm == "PARTIAL_CREDIT" && paidAmt > 0) paidAmt else null
                                             )
 
                                             onSubmit(
@@ -2089,8 +2089,9 @@ fun SaleForm(
                     onExpandedChange = { isCustomerMenuOpen = !isCustomerMenuOpen }
                 ) {
                     OutlinedTextField(
-                        value = selectedCustomer?.name ?: (if (isUrdu) "کھاتہ دار منتخب کریں..." else "Select Khata Customer..."),
+                        value = selectedCustomer?.name ?: "",
                         onValueChange = {},
+                        placeholder = { Text(if (isUrdu) "کھاتہ دار منتخب کریں..." else "Select Khata Customer...", color = Slate400) },
                         readOnly = true,
                         leadingIcon = { Icon(Icons.Default.PersonSearch, contentDescription = null, tint = DukanGreenPrimary, modifier = Modifier.size(18.dp)) },
                         trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = isCustomerMenuOpen) },
@@ -2623,8 +2624,9 @@ fun PurchaseForm(
                 onExpandedChange = { isSupplierMenuOpen = !isSupplierMenuOpen }
             ) {
                 OutlinedTextField(
-                    value = selectedSupplier?.name ?: (if (customSupplierName.isNotBlank()) customSupplierName else (if (isUrdu) "سپلائر چنیں یا نام درج کریں..." else "Select or enter supplier name...")),
+                    value = selectedSupplier?.name ?: customSupplierName,
                     onValueChange = { onCustomSupplierNameChange(it) },
+                    placeholder = { Text(if (isUrdu) "سپلائر چنیں یا نام درج کریں..." else "Select or enter supplier name...", color = Slate400) },
                     readOnly = false,
                     leadingIcon = { Icon(Icons.Default.Store, contentDescription = null, tint = Color(0xFF2563EB), modifier = Modifier.size(18.dp)) },
                     trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = isSupplierMenuOpen) },
@@ -2835,8 +2837,9 @@ fun PurchaseForm(
                     onExpandedChange = { isItemMenuOpen = !isItemMenuOpen }
                 ) {
                     OutlinedTextField(
-                        value = selectedItem?.name ?: (if (customPurchaseItemName.isNotBlank()) customPurchaseItemName else (if (isUrdu) "انوینٹری سے آئٹم منتخب کریں یا نام درج کریں..." else "Select product or type name...")),
+                        value = selectedItem?.name ?: customPurchaseItemName,
                         onValueChange = { onCustomItemNameChange(it) },
+                        placeholder = { Text(if (isUrdu) "انوینٹری سے آئٹم منتخب کریں یا نام درج کریں..." else "Select product or type name...", color = Slate400) },
                         readOnly = false,
                         leadingIcon = { Icon(Icons.Default.ShoppingBag, contentDescription = null, tint = Color(0xFF2563EB), modifier = Modifier.size(18.dp)) },
                         trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = isItemMenuOpen) },
@@ -3802,8 +3805,9 @@ fun ReceiptForm(
                         onExpandedChange = { isCustomerMenuOpen = !isCustomerMenuOpen }
                     ) {
                         OutlinedTextField(
-                            value = selectedCustomer?.name ?: (if (isUrdu) "گاہک منتخب کریں..." else "Select Customer..."),
+                            value = selectedCustomer?.name ?: "",
                             onValueChange = {},
+                            placeholder = { Text(if (isUrdu) "گاہک منتخب کریں..." else "Select Customer...", color = Slate400) },
                             readOnly = true,
                             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = isCustomerMenuOpen) },
                             shape = RoundedCornerShape(12.dp),
@@ -4260,8 +4264,9 @@ fun PaymentForm(
                         onExpandedChange = { isSupplierMenuOpen = !isSupplierMenuOpen }
                     ) {
                         OutlinedTextField(
-                            value = selectedSupplier?.name ?: (if (isUrdu) "سپلائر چنیں..." else "Select Supplier..."),
+                            value = selectedSupplier?.name ?: "",
                             onValueChange = {},
+                            placeholder = { Text(if (isUrdu) "سپلائر چنیں..." else "Select Supplier...", color = Slate400) },
                             readOnly = true,
                             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = isSupplierMenuOpen) },
                             shape = RoundedCornerShape(12.dp),
