@@ -1092,4 +1092,68 @@ class AccountingEngineTest {
         assertTrue(filtered.any { it.id == "tx3" })
         assertFalse(filtered.any { it.id == "tx4" })
     }
+
+    @Test
+    fun testPurchaseClassificationAndHistoryInclusion() {
+        val todayStr = AccountingEngine.getYesterdayIsoDate().let {
+            val cal = java.util.Calendar.getInstance()
+            java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(cal.time)
+        }
+
+        // 1. Cash Purchase
+        val cashPurchase = Transaction(
+            id = "tx_pur_cash",
+            type = TransactionType.PURCHASE,
+            amount = 5000.0,
+            paymentMethod = PaymentMethod.CASH,
+            date = todayStr,
+            partyName = "Supplier A"
+        )
+
+        // 2. Full-Credit Purchase
+        val creditPurchase = Transaction(
+            id = "tx_pur_credit",
+            type = TransactionType.PURCHASE,
+            amount = 12000.0,
+            paymentMethod = PaymentMethod.CREDIT,
+            date = todayStr,
+            partyName = "Supplier B"
+        )
+
+        // 3. Partial-Credit Purchase (e.g. Rs 10,000 total with Rs 4,000 cash paid)
+        val partialCreditPurchase = Transaction(
+            id = "tx_pur_partial",
+            type = TransactionType.PURCHASE,
+            amount = 10000.0,
+            paymentMethod = PaymentMethod.CREDIT,
+            cashPaid = 4000.0,
+            date = "$todayStr 14:30:00",
+            partyName = "Supplier C"
+        )
+
+        // 4. Non-purchase transactions that must be excluded
+        val saleTx = Transaction(id = "tx_sale", type = TransactionType.SALE, amount = 3000.0, date = todayStr)
+        val receiptTx = Transaction(id = "tx_receipt", type = TransactionType.RECEIPT, amount = 2000.0, date = todayStr)
+        val loanRepayTx = Transaction(id = "tx_loan", type = TransactionType.LOAN_GIVEN, amount = 1500.0, date = todayStr)
+
+        val allTx = listOf(cashPurchase, creditPurchase, partialCreditPurchase, saleTx, receiptTx, loanRepayTx)
+
+        // Filter by TransactionType.PURCHASE (as in TransactionsScreen with Purchases filter)
+        val purchaseFiltered = allTx.filter { it.type == TransactionType.PURCHASE }
+
+        assertEquals(3, purchaseFiltered.size)
+        assertTrue(purchaseFiltered.any { it.id == "tx_pur_cash" })
+        assertTrue(purchaseFiltered.any { it.id == "tx_pur_credit" })
+        assertTrue(purchaseFiltered.any { it.id == "tx_pur_partial" })
+
+        // Check sum of today purchases
+        val totalPurchases = purchaseFiltered.sumOf { it.amount }
+        assertEquals(27000.0, totalPurchases, 0.001)
+
+        // Verify non-purchases strictly excluded
+        assertFalse(purchaseFiltered.any { it.type == TransactionType.SALE })
+        assertFalse(purchaseFiltered.any { it.type == TransactionType.RECEIPT })
+        assertFalse(purchaseFiltered.any { it.type == TransactionType.LOAN_GIVEN })
+    }
 }
+

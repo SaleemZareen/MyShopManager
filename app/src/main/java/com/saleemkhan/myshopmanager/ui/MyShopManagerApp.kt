@@ -49,9 +49,13 @@ fun MyShopManagerApp() {
     var isAiOpen by remember { mutableStateOf(false) }
     var isNavPinned by remember { mutableStateOf(false) }
     var editingTransaction by remember { mutableStateOf<Transaction?>(null) }
+    var transactionsInitialTypeFilter by remember { mutableStateOf<TransactionType?>(null) }
 
     fun navigateTo(screen: Screen) {
         if (screen != currentScreen) {
+            if (screen != Screen.TRANSACTIONS) {
+                transactionsInitialTypeFilter = null
+            }
             screenHistory = screenHistory + screen
             currentScreen = screen
         }
@@ -272,6 +276,10 @@ fun MyShopManagerApp() {
                                             onDismissOnboardingCard = {
                                                 isOnboardingCardDismissed = true
                                                 repository.setOnboardingCardDismissed(true)
+                                            },
+                                            onNavigateToPurchases = {
+                                                transactionsInitialTypeFilter = TransactionType.PURCHASE
+                                                navigateTo(Screen.TRANSACTIONS)
                                             }
                                         )
                                     }
@@ -279,6 +287,7 @@ fun MyShopManagerApp() {
                                 TransactionsScreen(
                                     state = appState,
                                     isUrdu = isUrdu,
+                                    initialTypeFilter = transactionsInitialTypeFilter,
                                     onOpenQuickEntry = { type ->
                                         editingTransaction = null
                                         quickEntryType = type

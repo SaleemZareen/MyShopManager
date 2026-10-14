@@ -34,6 +34,7 @@ import com.saleemkhan.myshopmanager.model.*
 import com.saleemkhan.myshopmanager.ui.components.AutoScrollText
 import com.saleemkhan.myshopmanager.ui.components.OnboardingSetupCard
 import com.saleemkhan.myshopmanager.ui.theme.*
+import com.saleemkhan.myshopmanager.data.accounting.AccountingEngine
 import com.saleemkhan.myshopmanager.utils.FormatUtils
 import com.saleemkhan.myshopmanager.utils.TaxEngine
 import java.text.SimpleDateFormat
@@ -55,26 +56,46 @@ fun DashboardScreen(
     onOpenSettings: () -> Unit = {},
     onOpenAddInventory: () -> Unit = {},
     onOpenKhata: () -> Unit = {},
-    onDismissOnboardingCard: () -> Unit = {}
+    onDismissOnboardingCard: () -> Unit = {},
+    onNavigateToPurchases: (() -> Unit)? = null
 ) {
     val taxSummary = remember(state) { TaxEngine.calculateFbrSummary(state) }
 
-    // Today's metrics
-    val todayIso = remember { FormatUtils.getTodayIsoDate() }
+    // Reference date & normalized ISOs for Today and Yesterday
+    val referenceDate = remember { Date() }
+    val todayIso = remember(referenceDate) { FormatUtils.getTodayIsoDate() }
+    val yesterdayIso = remember(referenceDate) { AccountingEngine.getYesterdayIsoDate(referenceDate) }
+
+    fun matchesDay(dateStr: String, targetIso: String): Boolean {
+        val clean = dateStr.trim()
+        if (clean.isBlank()) return false
+        val cleanIso = if (clean.length >= 10) clean.substring(0, 10) else clean
+        return cleanIso == targetIso || clean.startsWith(targetIso) ||
+                FormatUtils.formatDisplayDate(clean) == FormatUtils.formatDisplayDate(targetIso)
+    }
+
     val todayTransactions = remember(state.transactions, todayIso) {
-        state.transactions.filter { t ->
-            val cleanDate = t.date.trim()
-            cleanDate.startsWith(todayIso) ||
-                    (cleanDate.isNotBlank() && FormatUtils.formatDisplayDate(cleanDate) == FormatUtils.formatDisplayDate(todayIso))
-        }
+        state.transactions.filter { matchesDay(it.date, todayIso) }
+    }
+
+    val yesterdayTransactions = remember(state.transactions, yesterdayIso) {
+        state.transactions.filter { matchesDay(it.date, yesterdayIso) }
     }
 
     val todaySales = remember(todayTransactions) {
         todayTransactions.filter { it.type == TransactionType.SALE }.sumOf { it.amount }
     }
+    val yesterdaySales = remember(yesterdayTransactions) {
+        yesterdayTransactions.filter { it.type == TransactionType.SALE }.sumOf { it.amount }
+    }
+
     val todayPurchases = remember(todayTransactions) {
         todayTransactions.filter { it.type == TransactionType.PURCHASE }.sumOf { it.amount }
     }
+    val yesterdayPurchases = remember(yesterdayTransactions) {
+        yesterdayTransactions.filter { it.type == TransactionType.PURCHASE }.sumOf { it.amount }
+    }
+
     val todayExpenses = remember(todayTransactions) {
         todayTransactions.filter { it.type == TransactionType.EXPENSE }.sumOf { it.amount }
     }
@@ -505,9 +526,17 @@ fun DashboardScreen(
                             }
                         }
 
-                        // Total Purchases Card
+                        // Total Purchases Card (Clickable -> Opens Transactions Screen with Purchases Filter)
+                        val purchaseCardModifier = if (onNavigateToPurchases != null) {
+                            Modifier
+                                .weight(1f)
+                                .clickable { onNavigateToPurchases() }
+                        } else {
+                            Modifier.weight(1f)
+                        }
+
                         Card(
-                            modifier = Modifier.weight(1f),
+                            modifier = purchaseCardModifier,
                             shape = RoundedCornerShape(16.dp),
                             colors = CardDefaults.cardColors(containerColor = Color.White),
                             border = BorderStroke(1.dp, Slate200)
@@ -546,15 +575,59 @@ fun DashboardScreen(
                                     color = Color(0xFF312E81)
                                 )
                                 Spacer(modifier = Modifier.height(4.dp))
+
+                                // Dynamic comparison pill vs yesterday
+                                val (purchaseTrendText, purchaseTrendColor, purchaseTrendBg) = remember(todayPurchases, yesterdayPurchases, isUrdu) {
+                                    when {
+                                        yesterdayPurchases == 0.0 && todayPurchases == 0.0 -> {
+                                            Triple(
+                                                if (isUrdu) "— 0٪ بمقابلہ کل" else "— 0% vs yesterday",
+                                                Slate600,
+                                                Slate100
+                                            )
+                                        }
+                                        yesterdayPurchases == 0.0 && todayPurchases > 0.0 -> {
+                                            Triple(
+                                                if (isUrdu) "▲ نیا بمقابلہ کل" else "▲ New vs yesterday",
+                                                Color(0xFF4338CA),
+                                                Color(0xFFEEF2FF)
+                                            )
+                                        }
+                                        todayPurchases == yesterdayPurchases -> {
+                                            Triple(
+                                                if (isUrdu) "— 0٪ بمقابلہ کل" else "— 0% vs yesterday",
+                                                Slate600,
+                                                Slate100
+                                            )
+                                        }
+                                        todayPurchases > yesterdayPurchases -> {
+                                            val pct = kotlin.math.round(((todayPurchases - yesterdayPurchases) / yesterdayPurchases) * 100.0).toInt()
+                                            Triple(
+                                                if (isUrdu) "▲ $pct٪ بمقابلہ کل" else "▲ $pct% vs yesterday",
+                                                Color(0xFF4338CA),
+                                                Color(0xFFEEF2FF)
+                                            )
+                                        }
+                                        else -> {
+                                            val pct = kotlin.math.round(((yesterdayPurchases - todayPurchases) / yesterdayPurchases) * 100.0).toInt()
+                                            Triple(
+                                                if (isUrdu) "▼ $pct٪ بمقابلہ کل" else "▼ $pct% vs yesterday",
+                                                Slate600,
+                                                Slate100
+                                            )
+                                        }
+                                    }
+                                }
+
                                 Surface(
-                                    color = Slate100,
+                                    color = purchaseTrendBg,
                                     shape = RoundedCornerShape(6.dp)
                                 ) {
                                     Text(
-                                        text = if (isUrdu) "— 0٪ بمقابلہ کل" else "— 0% vs yesterday",
+                                        text = purchaseTrendText,
                                         fontSize = 9.sp,
                                         fontWeight = FontWeight.Medium,
-                                        color = Slate600,
+                                        color = purchaseTrendColor,
                                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                                     )
                                 }

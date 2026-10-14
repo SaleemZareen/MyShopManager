@@ -47,6 +47,7 @@ enum class TransactionDateFilter {
 fun TransactionsScreen(
     state: AppState,
     isUrdu: Boolean,
+    initialTypeFilter: TransactionType? = null,
     onOpenQuickEntry: (TransactionType) -> Unit,
     onDeleteTransaction: (String) -> Boolean, // returns false if blocked by stock safety
     onRestoreTransaction: (String) -> Unit,
@@ -56,8 +57,8 @@ fun TransactionsScreen(
 ) {
     val context = LocalContext.current
     var search by remember { mutableStateOf("") }
-    var filterType by remember { mutableStateOf<TransactionType?>(null) }
-    var flowFilter by remember { mutableStateOf<String?>(null) } // "INFLOW" or "OUTFLOW" or null
+    var filterType by remember(initialTypeFilter) { mutableStateOf<TransactionType?>(initialTypeFilter) }
+    var flowFilter by remember(initialTypeFilter) { mutableStateOf<String?>(null) } // "INFLOW" or "OUTFLOW" or null
     var filterDateRange by remember { mutableStateOf(TransactionDateFilter.ALL) }
     var customStartDate by remember { mutableStateOf("") }
     var customEndDate by remember { mutableStateOf("") }
