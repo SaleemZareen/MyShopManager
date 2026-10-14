@@ -268,27 +268,32 @@ fun QuickEntryDialog(
         }
     }
 
-    fun shareWhatsAppReceipt(
+    fun shareStandardizedWhatsAppInvoice(
         title: String,
         partyName: String,
-        amount: Double,
         details: String,
-        remainingBalance: Double? = null
+        previousBalance: Double,
+        newBillAmount: Double,
+        amountReceived: Double,
+        totalOutstanding: Double,
+        date: String = FormatUtils.getTodayIsoDate()
     ) {
-        val shopName = if (isUrdu && !state.profile.shopNameUrdu.isNullOrBlank()) state.profile.shopNameUrdu else state.profile.shopName
+        val shopName = if (isUrdu && !state.profile.shopNameUrdu.isNullOrBlank()) state.profile.shopNameUrdu else (state.profile.shopName.ifBlank { "MyShop Manager" })
         val sb = StringBuilder()
         sb.appendLine("🧾 *${shopName}*")
         sb.appendLine("==========================")
         sb.appendLine("${if (isUrdu) "قسم" else "Type"}: $title")
-        sb.appendLine("${if (isUrdu) "تاریخ" else "Date"}: ${FormatUtils.getTodayIsoDate()}")
+        sb.appendLine("${if (isUrdu) "تاریخ" else "Date"}: $date")
         sb.appendLine("${if (isUrdu) "گاہک / فریق" else "Party"}: $partyName")
         sb.appendLine("--------------------------")
-        sb.appendLine(details)
-        sb.appendLine("--------------------------")
-        sb.appendLine("💰 *${if (isUrdu) "کل رقم" else "Total Amount"}: ${FormatUtils.formatCurrency(amount)}*")
-        if (remainingBalance != null) {
-            sb.appendLine("${if (isUrdu) "باقایہ حساب" else "Current Balance"}: ${FormatUtils.formatCurrency(remainingBalance)}")
+        if (details.isNotBlank()) {
+            sb.appendLine(details)
+            sb.appendLine("--------------------------")
         }
+        sb.appendLine("1️⃣ ${if (isUrdu) "سابقہ بقایا / ادھار" else "Previous Outstanding Balance"}: ${FormatUtils.formatCurrency(previousBalance)}")
+        sb.appendLine("2️⃣ ${if (isUrdu) "نیا بل" else "New Bill Amount"}: ${FormatUtils.formatCurrency(newBillAmount)}")
+        sb.appendLine("3️⃣ ${if (isUrdu) "وصول شدہ رقم" else "Amount Received"}: ${FormatUtils.formatCurrency(amountReceived)}")
+        sb.appendLine("4️⃣ *${if (isUrdu) "کل بقایا ادھار" else "Total Outstanding Balance"}: ${FormatUtils.formatCurrency(totalOutstanding)}*")
         sb.appendLine("==========================")
         sb.appendLine(if (isUrdu) "شکریہ! دوبارہ تشریف لائیں۔" else "Thank you for your business!")
         sb.appendLine("📱 *MyShop Manager*")
@@ -304,6 +309,27 @@ fun QuickEntryDialog(
         } catch (e: Exception) {
             Toast.makeText(context, "Could not open share menu", Toast.LENGTH_SHORT).show()
         }
+    }
+
+    fun shareWhatsAppReceipt(
+        title: String,
+        partyName: String,
+        amount: Double,
+        details: String,
+        remainingBalance: Double? = null
+    ) {
+        val prev = 0.0
+        val received = if (remainingBalance != null && remainingBalance > 0) 0.0 else amount
+        val finalOutstanding = remainingBalance ?: (amount - received)
+        shareStandardizedWhatsAppInvoice(
+            title = title,
+            partyName = partyName,
+            details = details,
+            previousBalance = prev,
+            newBillAmount = amount,
+            amountReceived = received,
+            totalOutstanding = finalOutstanding
+        )
     }
 
     Dialog(
@@ -549,19 +575,28 @@ fun QuickEntryDialog(
                                             customCustomerName.ifBlank { if (isUrdu) "نقد کاؤنٹر گاہک" else "Counter Cash Customer" }
                                         }
                                         val cust = if (customerType == "KHATA") state.customers.find { it.id == selectedCustomerId } else null
-                                        val remaining = if (cust != null && salePaymentMethod == PaymentMethod.CREDIT) cust.totalCredit + netSaleTotal else null
+                                        val prevDue = cust?.totalCredit ?: 0.0
+                                        val newBill = netSaleTotal
+                                        val received = when (salePaymentMethod) {
+                                            PaymentMethod.CREDIT -> 0.0
+                                            else -> netSaleTotal
+                                        }
+                                        val totalDue = prevDue + newBill - received
                                         val details = if (saleMode == "POS") {
                                             cartItems.joinToString("\n") { "• ${it.item.name}: ${it.quantity.toInt()} x ${FormatUtils.formatCurrency(it.unitPrice)} = ${FormatUtils.formatCurrency(it.lineTotal)}" } +
                                                     (if (parsedSaleDiscount > 0) "\nDiscount: -${FormatUtils.formatCurrency(parsedSaleDiscount)}" else "")
                                         } else {
                                             "Direct Sale: ${FormatUtils.formatCurrency(posSubtotal)}" + (if (parsedSaleDiscount > 0) "\nDiscount: -${FormatUtils.formatCurrency(parsedSaleDiscount)}" else "")
                                         }
-                                        shareWhatsAppReceipt(
-                                            title = if (isUrdu) "فروخت رسیـد" else "Sale Receipt",
+                                        shareStandardizedWhatsAppInvoice(
+                                            title = if (isUrdu) "فروخت رسیـد" else "Sale Invoice",
                                             partyName = party,
-                                            amount = netSaleTotal,
                                             details = details,
-                                            remainingBalance = remaining
+                                            previousBalance = prevDue,
+                                            newBillAmount = newBill,
+                                            amountReceived = received,
+                                            totalOutstanding = totalDue,
+                                            date = saleDate.ifBlank { FormatUtils.getTodayIsoDate() }
                                         )
                                     }
                                 )
@@ -1023,33 +1058,80 @@ fun QuickEntryDialog(
 
                                 TransactionType.RECEIPT -> {
                                     val amt = receiptAmount.toDoubleOrNull() ?: 0.0
-                                    Button(
-                                        onClick = submitReceiptAction,
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .height(52.dp),
-                                        shape = RoundedCornerShape(16.dp),
-                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD97706))
+                                    val customer = state.customers.find { it.id == receiptCustomerId }
+                                    Column(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalArrangement = Arrangement.spacedBy(8.dp)
                                     ) {
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
+                                        Surface(
+                                            onClick = {
+                                                val party = customer?.name ?: (if (isUrdu) "کھاتہ دار گاہک" else "Khata Customer")
+                                                val prevDue = customer?.totalCredit ?: 0.0
+                                                val newBill = 0.0
+                                                val received = amt
+                                                val totalDue = (prevDue - received).coerceAtLeast(0.0)
+                                                val details = if (isUrdu) "ادھار وصولی: ${FormatUtils.formatCurrency(amt)}" else "Udhaar Recovery: ${FormatUtils.formatCurrency(amt)}"
+                                                shareStandardizedWhatsAppInvoice(
+                                                    title = if (isUrdu) "ادھار وصولی رسید" else "Udhaar Recovery Receipt",
+                                                    partyName = party,
+                                                    details = details,
+                                                    previousBalance = prevDue,
+                                                    newBillAmount = newBill,
+                                                    amountReceived = received,
+                                                    totalOutstanding = totalDue,
+                                                    date = receiptDate.ifBlank { FormatUtils.getTodayIsoDate() }
+                                                )
+                                            },
+                                            shape = RoundedCornerShape(12.dp),
+                                            color = Color(0xFF25D366),
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .height(40.dp)
                                         ) {
-                                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                                Icon(Icons.Default.Paid, contentDescription = "Receipt", modifier = Modifier.size(20.dp))
-                                                Spacer(modifier = Modifier.width(8.dp))
+                                            Row(
+                                                modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.Center
+                                            ) {
+                                                Icon(Icons.Default.Share, contentDescription = "WhatsApp", tint = Color.White, modifier = Modifier.size(16.dp))
+                                                Spacer(modifier = Modifier.width(6.dp))
                                                 Text(
-                                                    text = if (isUrdu) "ادھار وصولی محفوظ کریں" else "Record Udhaar Recovery",
-                                                    fontWeight = FontWeight.Bold,
-                                                    fontSize = 15.sp
+                                                    text = if (isUrdu) "واٹس ایپ پر وصولی رسید شیئر کریں" else "Share WhatsApp Recovery Receipt",
+                                                    color = Color.White,
+                                                    fontSize = 12.sp,
+                                                    fontWeight = FontWeight.Bold
                                                 )
                                             }
-                                            Text(
-                                                text = FormatUtils.formatCurrency(amt),
-                                                fontWeight = FontWeight.Bold,
-                                                fontSize = 16.sp
-                                            )
+                                        }
+
+                                        Button(
+                                            onClick = submitReceiptAction,
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .height(52.dp),
+                                            shape = RoundedCornerShape(16.dp),
+                                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD97706))
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                                    Icon(Icons.Default.Paid, contentDescription = "Receipt", modifier = Modifier.size(20.dp))
+                                                    Spacer(modifier = Modifier.width(8.dp))
+                                                    Text(
+                                                        text = if (isUrdu) "ادھار وصولی محفوظ کریں" else "Record Udhaar Recovery",
+                                                        fontWeight = FontWeight.Bold,
+                                                        fontSize = 15.sp
+                                                    )
+                                                }
+                                                Text(
+                                                    text = FormatUtils.formatCurrency(amt),
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontSize = 16.sp
+                                                )
+                                            }
                                         }
                                     }
                                 }

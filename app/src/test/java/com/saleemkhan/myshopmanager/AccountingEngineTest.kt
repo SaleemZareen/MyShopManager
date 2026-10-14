@@ -961,4 +961,135 @@ class AccountingEngineTest {
         val bs = AccountingEngine.calculateBalanceSheet(stateAfter)
         assertTrue(bs.isBalanced)
     }
+
+    @Test
+    fun testLoanRepaymentSafetyAndDuplicateProtection() {
+        val cash = BankAccount(id = "b_cash", type = "CASH", balance = 50000.0, openingBalance = 50000.0)
+        val loan = LoanRecord(id = "loan_1", lenderName = "Habib Bank", amount = 30000.0, outstandingAmount = 30000.0)
+        val supplier = SupplierParty(id = "s_1", name = "Test Vendor", totalPayable = 5000.0, openingBalance = 5000.0)
+
+        val initialState = AppState(
+            bankAccounts = listOf(cash),
+            loans = listOf(loan),
+            suppliers = listOf(supplier)
+        )
+
+        // 1. Valid repayment of 10,000
+        val repayTx = Transaction(
+            id = "tx_repay_1",
+            type = TransactionType.PAYMENT,
+            amount = 10000.0,
+            category = "LOAN_REPAYMENT",
+            paymentMethod = PaymentMethod.CASH,
+            accountId = "b_cash",
+            loanAccountId = "loan_1",
+            partyName = "Habib Bank"
+        )
+
+        val stateAfterRepay = AccountingEngine.applyTransaction(initialState, repayTx)
+
+        // Cash reduced by 10,000
+        assertEquals(40000.0, stateAfterRepay.bankAccounts.first().balance, 0.001)
+        // Loan outstanding reduced to 20,000
+        assertEquals(20000.0, stateAfterRepay.loans.first().outstandingAmount, 0.001)
+        // Supplier payables must be COMPLETELY unaffected
+        assertEquals(5000.0, stateAfterRepay.suppliers.first().totalPayable, 0.001)
+
+        // 2. Duplicate submission protection: applying the same transaction ID again must NOT change balances
+        val stateAfterDup = AccountingEngine.applyTransaction(stateAfterRepay, repayTx)
+        assertEquals(40000.0, stateAfterDup.bankAccounts.first().balance, 0.001)
+        assertEquals(20000.0, stateAfterDup.loans.first().outstandingAmount, 0.001)
+        assertEquals(1, stateAfterDup.transactions.size)
+
+        // 3. Reversal of loan repayment
+        val stateAfterReversal = AccountingEngine.reverseTransaction(stateAfterRepay, repayTx)
+        assertEquals(50000.0, stateAfterReversal.bankAccounts.first().balance, 0.001)
+        assertEquals(30000.0, stateAfterReversal.loans.first().outstandingAmount, 0.001)
+        assertEquals(5000.0, stateAfterReversal.suppliers.first().totalPayable, 0.001)
+
+        // 4. Rebuild balances consistency
+        val rebuiltState = AccountingEngine.rebuildBalances(stateAfterRepay)
+        assertEquals(40000.0, rebuiltState.bankAccounts.first().balance, 0.001)
+        assertEquals(20000.0, rebuiltState.loans.first().outstandingAmount, 0.001)
+        assertEquals(5000.0, rebuiltState.suppliers.first().totalPayable, 0.001)
+    }
+
+    @Test
+    fun testPartialCreditPurchaseReversalAndRebuildConsistency() {
+        val cash = BankAccount(id = "b_cash", type = "CASH", balance = 20000.0, openingBalance = 20000.0)
+        val supp = SupplierParty(id = "s_mill", name = "City Mills", totalPayable = 0.0, openingBalance = 0.0)
+        val item = InventoryItem(id = "i_flour", name = "Flour", quantity = 10.0, purchasePrice = 400.0, openingStock = 10.0, openingCostPrice = 400.0)
+
+        val initialState = AppState(
+            bankAccounts = listOf(cash),
+            suppliers = listOf(supp),
+            inventory = listOf(item)
+        )
+
+        // Purchase Rs. 10,000: Rs. 4,000 paid in cash, Rs. 6,000 on credit
+        val purchaseTx = Transaction(
+            id = "tx_pur_partial",
+            type = TransactionType.PURCHASE,
+            amount = 10000.0,
+            paymentMethod = PaymentMethod.CREDIT,
+            accountId = "b_cash",
+            partyId = "s_mill",
+            partyName = "City Mills",
+            itemId = "i_flour",
+            qtyChange = 10.0,
+            unitCost = 1000.0,
+            cashPaid = 4000.0
+        )
+
+        // Apply
+        val stateApplied = AccountingEngine.applyTransaction(initialState, purchaseTx)
+        assertEquals(16000.0, stateApplied.bankAccounts.first().balance, 0.001)
+        assertEquals(6000.0, stateApplied.suppliers.first().totalPayable, 0.001)
+
+        // Reversal
+        val stateReversed = AccountingEngine.reverseTransaction(stateApplied, purchaseTx)
+        assertEquals(20000.0, stateReversed.bankAccounts.first().balance, 0.001)
+        assertEquals(0.0, stateReversed.suppliers.first().totalPayable, 0.001)
+
+        // Rebuild balances must match exactly
+        val stateRebuilt = AccountingEngine.rebuildBalances(stateApplied)
+        assertEquals(16000.0, stateRebuilt.bankAccounts.first().balance, 0.001)
+        assertEquals(6000.0, stateRebuilt.suppliers.first().totalPayable, 0.001)
+    }
+
+    @Test
+    fun testReportsFortnightPeriodFilter() {
+        val sdf = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
+        val cal = java.util.Calendar.getInstance()
+        val todayStr = sdf.format(cal.time)
+
+        cal.add(java.util.Calendar.DAY_OF_YEAR, -5)
+        val day5AgoStr = sdf.format(cal.time)
+
+        cal.add(java.util.Calendar.DAY_OF_YEAR, -8) // 13 days ago (inside 15-day fortnight)
+        val day13AgoStr = sdf.format(cal.time)
+
+        cal.add(java.util.Calendar.DAY_OF_YEAR, -10) // 23 days ago (outside 15-day fortnight)
+        val day23AgoStr = sdf.format(cal.time)
+
+        val txList = listOf(
+            Transaction(id = "tx1", type = TransactionType.SALE, amount = 100.0, date = todayStr),
+            Transaction(id = "tx2", type = TransactionType.SALE, amount = 200.0, date = day5AgoStr),
+            Transaction(id = "tx3", type = TransactionType.SALE, amount = 300.0, date = day13AgoStr),
+            Transaction(id = "tx4", type = TransactionType.SALE, amount = 400.0, date = day23AgoStr)
+        )
+
+        val filtered = com.saleemkhan.myshopmanager.ui.screens.filterTransactionsByPeriod(
+            transactions = txList,
+            period = com.saleemkhan.myshopmanager.ui.screens.ReportPeriod.FORTNIGHT,
+            customStart = "",
+            customEnd = ""
+        )
+
+        assertEquals(3, filtered.size)
+        assertTrue(filtered.any { it.id == "tx1" })
+        assertTrue(filtered.any { it.id == "tx2" })
+        assertTrue(filtered.any { it.id == "tx3" })
+        assertFalse(filtered.any { it.id == "tx4" })
+    }
 }

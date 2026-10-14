@@ -144,12 +144,17 @@ fun SaleInventoryItemDialog(
             sb.appendLine("${if (isUrdu) "رعایت (ڈسکاؤنٹ)" else "Discount"}: -${FormatUtils.formatCurrency(calculatedDiscount)}")
         }
         sb.appendLine("--------------------------")
-        sb.appendLine("💰 *${if (isUrdu) "کل واجب الادا" else "Net Total"}: ${FormatUtils.formatCurrency(netTotal)}*")
+        val prevDue = if (customerMode == "KHATA" && selectedCustomer != null) selectedCustomer.totalCredit else 0.0
+        val newBill = netTotal
+        val received = if (paymentMethod == PaymentMethod.CREDIT) 0.0 else netTotal
+        val totalDue = prevDue + newBill - received
+
         sb.appendLine("${if (isUrdu) "طریقہ ادائیگی" else "Payment"}: ${paymentMethod.name}")
-        if (customerMode == "KHATA" && selectedCustomer != null && paymentMethod == PaymentMethod.CREDIT) {
-            sb.appendLine("${if (isUrdu) "سابقہ ادھار" else "Previous Due"}: ${FormatUtils.formatCurrency(selectedCustomer.totalCredit)}")
-            sb.appendLine("${if (isUrdu) "نیا کل بقایا" else "New Total Due"}: ${FormatUtils.formatCurrency(selectedCustomer.totalCredit + netTotal)}")
-        }
+        sb.appendLine("--------------------------")
+        sb.appendLine("1️⃣ ${if (isUrdu) "سابقہ بقایا / ادھار" else "Previous Outstanding Balance"}: ${FormatUtils.formatCurrency(prevDue)}")
+        sb.appendLine("2️⃣ ${if (isUrdu) "نیا بل" else "New Bill Amount"}: ${FormatUtils.formatCurrency(newBill)}")
+        sb.appendLine("3️⃣ ${if (isUrdu) "وصول شدہ رقم" else "Amount Received"}: ${FormatUtils.formatCurrency(received)}")
+        sb.appendLine("4️⃣ *${if (isUrdu) "کل بقایا ادھار" else "Total Outstanding Balance"}: ${FormatUtils.formatCurrency(totalDue)}*")
         sb.appendLine("==========================")
         sb.appendLine(if (isUrdu) "شکریہ! دوبارہ تشریف لائیں۔" else "Thank you for shopping with us!")
 

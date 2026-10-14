@@ -140,6 +140,7 @@ enum class ReportPeriod(val titleEn: String, val titleUr: String) {
     TODAY("Today", "آج"),
     YESTERDAY("Yesterday", "گزشتہ کل"),
     THIS_WEEK("This Week", "اس ہفتے"),
+    FORTNIGHT("15 Days (Fortnight)", "پندرہ روزہ (15 دن)"),
     THIS_MONTH("This Month", "اس ماہ"),
     THIS_YEAR("This Year", "اس سال"),
     ALL_TIME("All Time", "مکمل ریکارڈ"),
@@ -166,9 +167,29 @@ fun ReportsScreen(
     var isReportDropdownOpen by remember { mutableStateOf(false) }
     var showExportDialog by remember { mutableStateOf(false) }
 
+    var selectedCustomerId by remember { mutableStateOf<String?>(null) }
+    var selectedSupplierId by remember { mutableStateOf<String?>(null) }
+    var selectedItemId by remember { mutableStateOf<String?>(null) }
+    var isCustomerFilterMenuOpen by remember { mutableStateOf(false) }
+    var isSupplierFilterMenuOpen by remember { mutableStateOf(false) }
+    var isItemFilterMenuOpen by remember { mutableStateOf(false) }
+
     // State filtering helper
-    val filteredTransactions = remember(state.transactions, selectedPeriod, customStartDate, customEndDate) {
+    val periodTransactions = remember(state.transactions, selectedPeriod, customStartDate, customEndDate) {
         filterTransactionsByPeriod(state.transactions, selectedPeriod, customStartDate, customEndDate)
+    }
+
+    val filteredTransactions = remember(periodTransactions, selectedCustomerId, selectedSupplierId, selectedItemId) {
+        val selectedCustName = state.customers.find { it.id == selectedCustomerId }?.name
+        val selectedSuppName = state.suppliers.find { it.id == selectedSupplierId }?.name
+        periodTransactions.filter { tx ->
+            val matchCust = selectedCustomerId == null || tx.partyId == selectedCustomerId ||
+                    (!tx.partyName.isNullOrBlank() && selectedCustName != null && tx.partyName.equals(selectedCustName, ignoreCase = true))
+            val matchSupp = selectedSupplierId == null || tx.partyId == selectedSupplierId ||
+                    (!tx.partyName.isNullOrBlank() && selectedSuppName != null && tx.partyName.equals(selectedSuppName, ignoreCase = true))
+            val matchItem = selectedItemId == null || tx.itemId == selectedItemId
+            matchCust && matchSupp && matchItem
+        }
     }
 
     // Comprehensive summary calculations
@@ -561,6 +582,195 @@ fun ReportsScreen(
                         }
                     }
 
+                    // Dedicated Entity Selectors (Customer, Supplier, Inventory Item)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        // Customer Selector
+                        Box {
+                            val activeCust = state.customers.find { it.id == selectedCustomerId }
+                            FilterChip(
+                                selected = selectedCustomerId != null,
+                                onClick = { isCustomerFilterMenuOpen = true },
+                                label = {
+                                    Text(
+                                        text = if (activeCust != null) "${if (isUrdu) "گاہک:" else "Cust:"} ${activeCust.name}"
+                                        else if (isUrdu) "تمام گاہک" else "All Customers",
+                                        fontSize = 11.sp,
+                                        fontWeight = if (selectedCustomerId != null) FontWeight.Bold else FontWeight.Normal
+                                    )
+                                },
+                                leadingIcon = {
+                                    Icon(Icons.Default.Person, contentDescription = null, modifier = Modifier.size(14.dp))
+                                },
+                                trailingIcon = {
+                                    if (selectedCustomerId != null) {
+                                        IconButton(
+                                            onClick = { selectedCustomerId = null },
+                                            modifier = Modifier.size(16.dp)
+                                        ) {
+                                            Icon(Icons.Default.Close, contentDescription = "Clear", modifier = Modifier.size(12.dp))
+                                        }
+                                    } else {
+                                        Icon(Icons.Default.ArrowDropDown, contentDescription = null, modifier = Modifier.size(14.dp))
+                                    }
+                                }
+                            )
+                            DropdownMenu(
+                                expanded = isCustomerFilterMenuOpen,
+                                onDismissRequest = { isCustomerFilterMenuOpen = false }
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text(if (isUrdu) "تمام گاہک (بغیر فلٹر)" else "All Customers", fontWeight = FontWeight.Bold, fontSize = 12.sp) },
+                                    onClick = {
+                                        selectedCustomerId = null
+                                        isCustomerFilterMenuOpen = false
+                                    }
+                                )
+                                state.customers.forEach { c ->
+                                    DropdownMenuItem(
+                                        text = {
+                                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                                Text(c.name, fontSize = 12.sp)
+                                                if (c.totalCredit > 0) {
+                                                    Spacer(Modifier.width(8.dp))
+                                                    Text(FormatUtils.formatCurrency(c.totalCredit), fontSize = 11.sp, color = AmberWarning)
+                                                }
+                                            }
+                                        },
+                                        onClick = {
+                                            selectedCustomerId = c.id
+                                            isCustomerFilterMenuOpen = false
+                                        }
+                                    )
+                                }
+                            }
+                        }
+
+                        // Supplier Selector
+                        Box {
+                            val activeSupp = state.suppliers.find { it.id == selectedSupplierId }
+                            FilterChip(
+                                selected = selectedSupplierId != null,
+                                onClick = { isSupplierFilterMenuOpen = true },
+                                label = {
+                                    Text(
+                                        text = if (activeSupp != null) "${if (isUrdu) "سپلائر:" else "Supp:"} ${activeSupp.name}"
+                                        else if (isUrdu) "تمام سپلائر" else "All Suppliers",
+                                        fontSize = 11.sp,
+                                        fontWeight = if (selectedSupplierId != null) FontWeight.Bold else FontWeight.Normal
+                                    )
+                                },
+                                leadingIcon = {
+                                    Icon(Icons.Default.LocalShipping, contentDescription = null, modifier = Modifier.size(14.dp))
+                                },
+                                trailingIcon = {
+                                    if (selectedSupplierId != null) {
+                                        IconButton(
+                                            onClick = { selectedSupplierId = null },
+                                            modifier = Modifier.size(16.dp)
+                                        ) {
+                                            Icon(Icons.Default.Close, contentDescription = "Clear", modifier = Modifier.size(12.dp))
+                                        }
+                                    } else {
+                                        Icon(Icons.Default.ArrowDropDown, contentDescription = null, modifier = Modifier.size(14.dp))
+                                    }
+                                }
+                            )
+                            DropdownMenu(
+                                expanded = isSupplierFilterMenuOpen,
+                                onDismissRequest = { isSupplierFilterMenuOpen = false }
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text(if (isUrdu) "تمام سپلائرز (بغیر فلٹر)" else "All Suppliers", fontWeight = FontWeight.Bold, fontSize = 12.sp) },
+                                    onClick = {
+                                        selectedSupplierId = null
+                                        isSupplierFilterMenuOpen = false
+                                    }
+                                )
+                                state.suppliers.forEach { s ->
+                                    DropdownMenuItem(
+                                        text = {
+                                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                                Text(s.name, fontSize = 12.sp)
+                                                if (s.totalPayable > 0) {
+                                                    Spacer(Modifier.width(8.dp))
+                                                    Text(FormatUtils.formatCurrency(s.totalPayable), fontSize = 11.sp, color = RedDanger)
+                                                }
+                                            }
+                                        },
+                                        onClick = {
+                                            selectedSupplierId = s.id
+                                            isSupplierFilterMenuOpen = false
+                                        }
+                                    )
+                                }
+                            }
+                        }
+
+                        // Inventory Item Selector
+                        Box {
+                            val activeItem = state.inventory.find { it.id == selectedItemId }
+                            FilterChip(
+                                selected = selectedItemId != null,
+                                onClick = { isItemFilterMenuOpen = true },
+                                label = {
+                                    Text(
+                                        text = if (activeItem != null) "${if (isUrdu) "آئٹم:" else "Item:"} ${activeItem.name}"
+                                        else if (isUrdu) "تمام اشیاء" else "All Items",
+                                        fontSize = 11.sp,
+                                        fontWeight = if (selectedItemId != null) FontWeight.Bold else FontWeight.Normal
+                                    )
+                                },
+                                leadingIcon = {
+                                    Icon(Icons.Default.Inventory2, contentDescription = null, modifier = Modifier.size(14.dp))
+                                },
+                                trailingIcon = {
+                                    if (selectedItemId != null) {
+                                        IconButton(
+                                            onClick = { selectedItemId = null },
+                                            modifier = Modifier.size(16.dp)
+                                        ) {
+                                            Icon(Icons.Default.Close, contentDescription = "Clear", modifier = Modifier.size(12.dp))
+                                        }
+                                    } else {
+                                        Icon(Icons.Default.ArrowDropDown, contentDescription = null, modifier = Modifier.size(14.dp))
+                                    }
+                                }
+                            )
+                            DropdownMenu(
+                                expanded = isItemFilterMenuOpen,
+                                onDismissRequest = { isItemFilterMenuOpen = false }
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text(if (isUrdu) "تمام اشیاء (بغیر فلٹر)" else "All Items", fontWeight = FontWeight.Bold, fontSize = 12.sp) },
+                                    onClick = {
+                                        selectedItemId = null
+                                        isItemFilterMenuOpen = false
+                                    }
+                                )
+                                state.inventory.forEach { item ->
+                                    DropdownMenuItem(
+                                        text = {
+                                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                                Text(item.name, fontSize = 12.sp)
+                                                Spacer(Modifier.width(8.dp))
+                                                Text("${item.quantity} ${item.unit}", fontSize = 11.sp, color = Slate500)
+                                            }
+                                        },
+                                        onClick = {
+                                            selectedItemId = item.id
+                                            isItemFilterMenuOpen = false
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+
                     // Search input
                     OutlinedTextField(
                         value = searchQuery,
@@ -670,8 +880,11 @@ fun ReportsScreen(
             }
             ReportType.CUSTOMER_LEDGER -> {
                 item {
+                    val displayCustomers = if (selectedCustomerId != null) {
+                        state.customers.filter { it.id == selectedCustomerId }
+                    } else state.customers
                     CustomerLedgerReportView(
-                        customers = state.customers,
+                        customers = displayCustomers,
                         searchQuery = searchQuery,
                         isUrdu = isUrdu
                     )
@@ -679,8 +892,11 @@ fun ReportsScreen(
             }
             ReportType.SUPPLIER_LEDGER -> {
                 item {
+                    val displaySuppliers = if (selectedSupplierId != null) {
+                        state.suppliers.filter { it.id == selectedSupplierId }
+                    } else state.suppliers
                     SupplierLedgerReportView(
-                        suppliers = state.suppliers,
+                        suppliers = displaySuppliers,
                         searchQuery = searchQuery,
                         isUrdu = isUrdu
                     )
@@ -688,8 +904,11 @@ fun ReportsScreen(
             }
             ReportType.STOCK_INVENTORY -> {
                 item {
+                    val displayInventory = if (selectedItemId != null) {
+                        state.inventory.filter { it.id == selectedItemId }
+                    } else state.inventory
                     StockValuationReportView(
-                        inventory = state.inventory,
+                        inventory = displayInventory,
                         searchQuery = searchQuery,
                         isUrdu = isUrdu
                     )
@@ -2182,6 +2401,10 @@ fun filterTransactionsByPeriod(
     calWeek.set(Calendar.DAY_OF_WEEK, Calendar.MONDAY)
     val weekStartStr = sdf.format(calWeek.time)
 
+    val calFortnight = Calendar.getInstance()
+    calFortnight.add(Calendar.DAY_OF_YEAR, -14)
+    val fortnightStartStr = sdf.format(calFortnight.time)
+
     return transactions.filter { tx ->
         val txDate = tx.date.take(10)
         if (txDate.isBlank()) return@filter false
@@ -2190,6 +2413,7 @@ fun filterTransactionsByPeriod(
             ReportPeriod.TODAY -> txDate == todayStr
             ReportPeriod.YESTERDAY -> txDate == yesterdayStr
             ReportPeriod.THIS_WEEK -> txDate >= weekStartStr && txDate <= todayStr
+            ReportPeriod.FORTNIGHT -> txDate in fortnightStartStr..todayStr
             ReportPeriod.THIS_MONTH -> txDate.startsWith(currentMonth)
             ReportPeriod.THIS_YEAR -> txDate.startsWith(currentYear)
             ReportPeriod.CUSTOM -> {

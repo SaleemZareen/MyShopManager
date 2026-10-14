@@ -158,12 +158,12 @@ object AccountingEngine {
      * Posts a new or restored transaction into the application state according to canonical accounting rules.
      */
     fun applyTransaction(state: AppState, tx: Transaction): AppState {
-        val updatedState = applyTransactionEffects(state, tx)
-        val updatedTxList = if (updatedState.transactions.any { it.id == tx.id }) {
-            updatedState.transactions.map { if (it.id == tx.id) tx else it }
-        } else {
-            listOf(tx) + updatedState.transactions
+        // Prevent duplicate processing of the same transaction
+        if (state.transactions.any { it.id == tx.id }) {
+            return state
         }
+        val updatedState = applyTransactionEffects(state, tx)
+        val updatedTxList = listOf(tx) + updatedState.transactions
         return updatedState.copy(transactions = updatedTxList)
     }
 
@@ -407,7 +407,12 @@ object AccountingEngine {
             }
 
             TransactionType.PAYMENT -> {
-                // Supplier debt settlement: Cash decreases, Supplier payable decreases
+                // Determine if this payment is a loan repayment or supplier debt settlement
+                val isLoanRepayment = !tx.loanAccountId.isNullOrBlank() ||
+                        tx.category.equals("LOAN_REPAYMENT", ignoreCase = true) ||
+                        tx.category.equals("Loan Repayment", ignoreCase = true)
+
+                // Cash/Bank account decreases
                 val targetAcc = findTargetAccount(updatedBankAccounts, tx.accountId, tx.paymentMethod)
                 if (targetAcc != null) {
                     updatedBankAccounts = updatedBankAccounts.map { acc ->
@@ -415,31 +420,46 @@ object AccountingEngine {
                     }
                 }
 
-                val partyNameClean = tx.partyName?.trim() ?: ""
-                val resolvedSuppId = resolvePartyId(tx, updatedCustomers, updatedSuppliers)
-                val existingSupp = updatedSuppliers.find { s ->
-                    (resolvedSuppId != null && s.id == resolvedSuppId) ||
-                            (partyNameClean.isNotBlank() && s.name.trim().equals(partyNameClean, ignoreCase = true))
-                }
+                if (isLoanRepayment) {
+                    // Loan repayment: affects loan account outstanding balance, NOT supplier payables
+                    val targetLoanId = tx.loanAccountId
+                    val partyNameClean = tx.partyName?.trim() ?: ""
+                    updatedLoans = updatedLoans.map { loan ->
+                        val isMatch = (!targetLoanId.isNullOrBlank() && loan.id == targetLoanId) ||
+                                (targetLoanId.isNullOrBlank() && partyNameClean.isNotBlank() && (loan.partyName.trim().equals(partyNameClean, ignoreCase = true) || loan.lenderName.trim().equals(partyNameClean, ignoreCase = true)))
+                        if (isMatch) {
+                            val clampedRepayment = amount.coerceAtMost(loan.outstandingAmount)
+                            loan.copy(outstandingAmount = roundMoney((loan.outstandingAmount - clampedRepayment).coerceAtLeast(0.0)))
+                        } else loan
+                    }
+                } else {
+                    // Supplier debt settlement: Supplier payable decreases
+                    val partyNameClean = tx.partyName?.trim() ?: ""
+                    val resolvedSuppId = resolvePartyId(tx, updatedCustomers, updatedSuppliers)
+                    val existingSupp = updatedSuppliers.find { s ->
+                        (resolvedSuppId != null && s.id == resolvedSuppId) ||
+                                (partyNameClean.isNotBlank() && s.name.trim().equals(partyNameClean, ignoreCase = true))
+                    }
 
-                val activeSuppId = if (existingSupp != null) {
-                    existingSupp.id
-                } else if (partyNameClean.isNotBlank()) {
-                    val newSuppId = tx.partyId?.ifBlank { null } ?: "supp_${System.currentTimeMillis()}"
-                    val newSupplier = SupplierParty(
-                        id = newSuppId,
-                        name = partyNameClean,
-                        phone = "",
-                        totalPayable = 0.0,
-                        status = "ACTIVE"
-                    )
-                    updatedSuppliers = updatedSuppliers + newSupplier
-                    newSuppId
-                } else null
+                    val activeSuppId = if (existingSupp != null) {
+                        existingSupp.id
+                    } else if (partyNameClean.isNotBlank()) {
+                        val newSuppId = tx.partyId?.ifBlank { null } ?: "supp_${System.currentTimeMillis()}"
+                        val newSupplier = SupplierParty(
+                            id = newSuppId,
+                            name = partyNameClean,
+                            phone = "",
+                            totalPayable = 0.0,
+                            status = "ACTIVE"
+                        )
+                        updatedSuppliers = updatedSuppliers + newSupplier
+                        newSuppId
+                    } else null
 
-                if (activeSuppId != null) {
-                    updatedSuppliers = updatedSuppliers.map { s ->
-                        if (s.id == activeSuppId) s.copy(totalPayable = roundMoney(s.totalPayable - amount)) else s
+                    if (activeSuppId != null) {
+                        updatedSuppliers = updatedSuppliers.map { s ->
+                            if (s.id == activeSuppId) s.copy(totalPayable = roundMoney(s.totalPayable - amount)) else s
+                        }
                     }
                 }
             }
@@ -465,10 +485,12 @@ object AccountingEngine {
                         if (acc.id == targetAcc.id) acc.copy(balance = roundMoney(acc.balance + amount)) else acc
                     }
                 }
-                if (!tx.loanAccountId.isNullOrBlank()) {
-                    updatedLoans = updatedLoans.map { loan ->
-                        if (loan.id == tx.loanAccountId) loan.copy(outstandingAmount = roundMoney(loan.outstandingAmount + amount)) else loan
-                    }
+                val targetLoanId = tx.loanAccountId
+                val partyNameClean = tx.partyName?.trim() ?: ""
+                updatedLoans = updatedLoans.map { loan ->
+                    val isMatch = (!targetLoanId.isNullOrBlank() && loan.id == targetLoanId) ||
+                            (targetLoanId.isNullOrBlank() && partyNameClean.isNotBlank() && (loan.partyName.trim().equals(partyNameClean, ignoreCase = true) || loan.lenderName.trim().equals(partyNameClean, ignoreCase = true)))
+                    if (isMatch) loan.copy(outstandingAmount = roundMoney(loan.outstandingAmount + amount)) else loan
                 }
             }
 
@@ -480,10 +502,12 @@ object AccountingEngine {
                         if (acc.id == targetAcc.id) acc.copy(balance = roundMoney(acc.balance - amount)) else acc
                     }
                 }
-                if (!tx.loanAccountId.isNullOrBlank()) {
-                    updatedLoans = updatedLoans.map { loan ->
-                        if (loan.id == tx.loanAccountId) loan.copy(outstandingAmount = roundMoney(loan.outstandingAmount + amount)) else loan
-                    }
+                val targetLoanId = tx.loanAccountId
+                val partyNameClean = tx.partyName?.trim() ?: ""
+                updatedLoans = updatedLoans.map { loan ->
+                    val isMatch = (!targetLoanId.isNullOrBlank() && loan.id == targetLoanId) ||
+                            (targetLoanId.isNullOrBlank() && partyNameClean.isNotBlank() && (loan.partyName.trim().equals(partyNameClean, ignoreCase = true) || loan.lenderName.trim().equals(partyNameClean, ignoreCase = true)))
+                    if (isMatch) loan.copy(outstandingAmount = roundMoney(loan.outstandingAmount + amount)) else loan
                 }
             }
         }
@@ -546,24 +570,30 @@ object AccountingEngine {
             }
 
             TransactionType.PURCHASE -> {
-                // Revert Liquidity or Payable
-                if (tx.paymentMethod == PaymentMethod.CREDIT) {
-                    val partyId = resolvePartyId(tx, state.customers, state.suppliers)
-                    updatedSuppliers = updatedSuppliers.map { s ->
-                        val isMatch = (partyId != null && s.id == partyId) ||
-                                (partyId == null && !tx.partyName.isNullOrBlank() && s.name.equals(tx.partyName, ignoreCase = true))
-                        if (isMatch) s.copy(totalPayable = roundMoney(s.totalPayable - amount)) else s
-                    }
-                } else {
+                val cashToRestore = roundMoney(tx.cashPaid ?: (if (tx.paymentMethod == PaymentMethod.CREDIT) 0.0 else amount))
+                val payableToReduce = roundMoney((amount - cashToRestore).coerceAtLeast(0.0))
+
+                // 1. Revert Cash / Liquidity Deduction (cash increases)
+                if (cashToRestore > 0.0) {
                     val targetAcc = findTargetAccount(updatedBankAccounts, tx.accountId, tx.paymentMethod)
                     if (targetAcc != null) {
                         updatedBankAccounts = updatedBankAccounts.map { acc ->
-                            if (acc.id == targetAcc.id) acc.copy(balance = roundMoney(acc.balance + amount)) else acc
+                            if (acc.id == targetAcc.id) acc.copy(balance = roundMoney(acc.balance + cashToRestore)) else acc
                         }
                     }
                 }
 
-                // Revert Inventory (deduct purchased quantity)
+                // 2. Revert Supplier Credit Payable (payable decreases)
+                if (payableToReduce > 0.0 || tx.paymentMethod == PaymentMethod.CREDIT) {
+                    val partyId = resolvePartyId(tx, state.customers, state.suppliers)
+                    updatedSuppliers = updatedSuppliers.map { s ->
+                        val isMatch = (partyId != null && s.id == partyId) ||
+                                (partyId == null && !tx.partyName.isNullOrBlank() && s.name.equals(tx.partyName, ignoreCase = true))
+                        if (isMatch) s.copy(totalPayable = roundMoney(s.totalPayable - payableToReduce)) else s
+                    }
+                }
+
+                // 3. Revert Inventory (deduct purchased quantity)
                 if (!tx.itemId.isNullOrBlank() && tx.qtyChange != null) {
                     val purchasedQty = tx.qtyChange
                     updatedInventory = updatedInventory.map { item ->
@@ -603,18 +633,38 @@ object AccountingEngine {
             }
 
             TransactionType.PAYMENT -> {
-                // Revert debt settlement: Cash increases, Supplier payable increases
+                val isLoanRepayment = !tx.loanAccountId.isNullOrBlank() ||
+                        tx.category.equals("LOAN_REPAYMENT", ignoreCase = true) ||
+                        tx.category.equals("Loan Repayment", ignoreCase = true)
+
+                // Revert cash deduction: Cash increases
                 val targetAcc = findTargetAccount(updatedBankAccounts, tx.accountId, tx.paymentMethod)
                 if (targetAcc != null) {
                     updatedBankAccounts = updatedBankAccounts.map { acc ->
                         if (acc.id == targetAcc.id) acc.copy(balance = roundMoney(acc.balance + amount)) else acc
                     }
                 }
-                val partyId = resolvePartyId(tx, state.customers, state.suppliers)
-                updatedSuppliers = updatedSuppliers.map { s ->
-                    val isMatch = (partyId != null && s.id == partyId) ||
-                            (partyId == null && !tx.partyName.isNullOrBlank() && s.name.equals(tx.partyName, ignoreCase = true))
-                    if (isMatch) s.copy(totalPayable = roundMoney(s.totalPayable + amount)) else s
+
+                if (isLoanRepayment) {
+                    // Revert loan repayment: Loan outstandingAmount increases (cannot exceed original loan amount)
+                    val targetLoanId = tx.loanAccountId
+                    val partyNameClean = tx.partyName?.trim() ?: ""
+                    updatedLoans = updatedLoans.map { loan ->
+                        val isMatch = (!targetLoanId.isNullOrBlank() && loan.id == targetLoanId) ||
+                                (targetLoanId.isNullOrBlank() && partyNameClean.isNotBlank() && (loan.partyName.trim().equals(partyNameClean, ignoreCase = true) || loan.lenderName.trim().equals(partyNameClean, ignoreCase = true)))
+                        if (isMatch) {
+                            val maxBalance = if (loan.amount > 0.0) loan.amount else Double.MAX_VALUE
+                            loan.copy(outstandingAmount = roundMoney((loan.outstandingAmount + amount).coerceAtMost(maxBalance)))
+                        } else loan
+                    }
+                } else {
+                    // Revert debt settlement: Supplier payable increases
+                    val partyId = resolvePartyId(tx, state.customers, state.suppliers)
+                    updatedSuppliers = updatedSuppliers.map { s ->
+                        val isMatch = (partyId != null && s.id == partyId) ||
+                                (partyId == null && !tx.partyName.isNullOrBlank() && s.name.equals(tx.partyName, ignoreCase = true))
+                        if (isMatch) s.copy(totalPayable = roundMoney(s.totalPayable + amount)) else s
+                    }
                 }
             }
 
@@ -638,10 +688,12 @@ object AccountingEngine {
                         if (acc.id == targetAcc.id) acc.copy(balance = roundMoney(acc.balance - amount)) else acc
                     }
                 }
-                if (!tx.loanAccountId.isNullOrBlank()) {
-                    updatedLoans = updatedLoans.map { loan ->
-                        if (loan.id == tx.loanAccountId) loan.copy(outstandingAmount = roundMoney(loan.outstandingAmount - amount)) else loan
-                    }
+                val targetLoanId = tx.loanAccountId
+                val partyNameClean = tx.partyName?.trim() ?: ""
+                updatedLoans = updatedLoans.map { loan ->
+                    val isMatch = (!targetLoanId.isNullOrBlank() && loan.id == targetLoanId) ||
+                            (targetLoanId.isNullOrBlank() && partyNameClean.isNotBlank() && (loan.partyName.trim().equals(partyNameClean, ignoreCase = true) || loan.lenderName.trim().equals(partyNameClean, ignoreCase = true)))
+                    if (isMatch) loan.copy(outstandingAmount = roundMoney((loan.outstandingAmount - amount).coerceAtLeast(0.0))) else loan
                 }
             }
 
@@ -652,10 +704,12 @@ object AccountingEngine {
                         if (acc.id == targetAcc.id) acc.copy(balance = roundMoney(acc.balance + amount)) else acc
                     }
                 }
-                if (!tx.loanAccountId.isNullOrBlank()) {
-                    updatedLoans = updatedLoans.map { loan ->
-                        if (loan.id == tx.loanAccountId) loan.copy(outstandingAmount = roundMoney(loan.outstandingAmount - amount)) else loan
-                    }
+                val targetLoanId = tx.loanAccountId
+                val partyNameClean = tx.partyName?.trim() ?: ""
+                updatedLoans = updatedLoans.map { loan ->
+                    val isMatch = (!targetLoanId.isNullOrBlank() && loan.id == targetLoanId) ||
+                            (targetLoanId.isNullOrBlank() && partyNameClean.isNotBlank() && (loan.partyName.trim().equals(partyNameClean, ignoreCase = true) || loan.lenderName.trim().equals(partyNameClean, ignoreCase = true)))
+                    if (isMatch) loan.copy(outstandingAmount = roundMoney((loan.outstandingAmount - amount).coerceAtLeast(0.0))) else loan
                 }
             }
         }
@@ -761,7 +815,10 @@ object AccountingEngine {
         // 3. Reset suppliers to opening balances
         val suppliersMap = state.suppliers.associate { it.id to it.copy(totalPayable = roundMoney(it.openingBalance)) }.toMutableMap()
 
-        // 4. Reset inventory to opening stock and cost
+        // 4. Reset loans to initial amounts
+        val loansMap = state.loans.associate { it.id to it.copy(outstandingAmount = roundMoney(it.amount)) }.toMutableMap()
+
+        // 5. Reset inventory to opening stock and cost
         val inventoryMap = state.inventory.associate { item ->
             val initialCost = if (item.openingCostPrice > 0.0) item.openingCostPrice else item.purchasePrice
             val initialStock = if (item.openingStock > 0.0) item.openingStock else {
@@ -776,10 +833,10 @@ object AccountingEngine {
             )
         }.toMutableMap()
 
-        // 5. Sort transactions chronologically (ascending by date)
+        // 6. Sort transactions chronologically (ascending by date)
         val sortedTransactions = state.transactions.sortedBy { it.date }
 
-        // 6. Replay ledger
+        // 7. Replay ledger
         for (tx in sortedTransactions) {
             val amount = roundMoney(tx.amount)
 
@@ -816,25 +873,33 @@ object AccountingEngine {
                 }
 
                 TransactionType.PURCHASE -> {
-                    if (tx.paymentMethod == PaymentMethod.CREDIT) {
+                    val cashToDeduct = roundMoney(tx.cashPaid ?: (if (tx.paymentMethod == PaymentMethod.CREDIT) 0.0 else amount))
+                    val payableToIncrease = roundMoney((amount - cashToDeduct).coerceAtLeast(0.0))
+
+                    // 1. Cash deduction
+                    if (cashToDeduct > 0.0) {
+                        val targetAcc = findTargetAccount(accountsMap.values.toList(), tx.accountId, tx.paymentMethod)
+                        if (targetAcc != null) {
+                            accountsMap[targetAcc.id] = targetAcc.copy(
+                                balance = roundMoney(targetAcc.balance - cashToDeduct)
+                            )
+                        }
+                    }
+
+                    // 2. Supplier payable
+                    if (payableToIncrease > 0.0 || tx.paymentMethod == PaymentMethod.CREDIT) {
                         val partyId = resolvePartyId(tx, state.customers, state.suppliers)
                         val targetSupp = if (partyId != null) suppliersMap[partyId] else {
                             suppliersMap.values.find { !tx.partyName.isNullOrBlank() && it.name.equals(tx.partyName, ignoreCase = true) }
                         }
                         if (targetSupp != null) {
                             suppliersMap[targetSupp.id] = targetSupp.copy(
-                                totalPayable = roundMoney(targetSupp.totalPayable + amount)
-                            )
-                        }
-                    } else {
-                        val targetAcc = findTargetAccount(accountsMap.values.toList(), tx.accountId, tx.paymentMethod)
-                        if (targetAcc != null) {
-                            accountsMap[targetAcc.id] = targetAcc.copy(
-                                balance = roundMoney(targetAcc.balance - amount)
+                                totalPayable = roundMoney(targetSupp.totalPayable + payableToIncrease)
                             )
                         }
                     }
 
+                    // 3. Inventory addition & AVCO
                     if (!tx.itemId.isNullOrBlank() && tx.qtyChange != null && tx.qtyChange > 0.0) {
                         val item = inventoryMap[tx.itemId]
                         if (item != null) {
@@ -882,20 +947,42 @@ object AccountingEngine {
                 }
 
                 TransactionType.PAYMENT -> {
+                    val isLoanRepayment = !tx.loanAccountId.isNullOrBlank() ||
+                            tx.category.equals("LOAN_REPAYMENT", ignoreCase = true) ||
+                            tx.category.equals("Loan Repayment", ignoreCase = true)
+
                     val targetAcc = findTargetAccount(accountsMap.values.toList(), tx.accountId, tx.paymentMethod)
                     if (targetAcc != null) {
                         accountsMap[targetAcc.id] = targetAcc.copy(
                             balance = roundMoney(targetAcc.balance - amount)
                         )
                     }
-                    val partyId = resolvePartyId(tx, state.customers, state.suppliers)
-                    val targetSupp = if (partyId != null) suppliersMap[partyId] else {
-                        suppliersMap.values.find { !tx.partyName.isNullOrBlank() && it.name.equals(tx.partyName, ignoreCase = true) }
-                    }
-                    if (targetSupp != null) {
-                        suppliersMap[targetSupp.id] = targetSupp.copy(
-                            totalPayable = roundMoney(targetSupp.totalPayable - amount)
-                        )
+
+                    if (isLoanRepayment) {
+                        val targetLoan = if (!tx.loanAccountId.isNullOrBlank()) {
+                            loansMap[tx.loanAccountId]
+                        } else {
+                            loansMap.values.find {
+                                !tx.partyName.isNullOrBlank() &&
+                                (it.partyName.equals(tx.partyName, ignoreCase = true) || it.lenderName.equals(tx.partyName, ignoreCase = true))
+                            }
+                        }
+                        if (targetLoan != null) {
+                            val clampedRepayment = amount.coerceAtMost(targetLoan.outstandingAmount)
+                            loansMap[targetLoan.id] = targetLoan.copy(
+                                outstandingAmount = roundMoney((targetLoan.outstandingAmount - clampedRepayment).coerceAtLeast(0.0))
+                            )
+                        }
+                    } else {
+                        val partyId = resolvePartyId(tx, state.customers, state.suppliers)
+                        val targetSupp = if (partyId != null) suppliersMap[partyId] else {
+                            suppliersMap.values.find { !tx.partyName.isNullOrBlank() && it.name.equals(tx.partyName, ignoreCase = true) }
+                        }
+                        if (targetSupp != null) {
+                            suppliersMap[targetSupp.id] = targetSupp.copy(
+                                totalPayable = roundMoney(targetSupp.totalPayable - amount)
+                            )
+                        }
                     }
                 }
 
@@ -918,6 +1005,19 @@ object AccountingEngine {
                             balance = roundMoney(targetAcc.balance + amount)
                         )
                     }
+                    val targetLoan = if (!tx.loanAccountId.isNullOrBlank()) {
+                        loansMap[tx.loanAccountId]
+                    } else {
+                        loansMap.values.find {
+                            !tx.partyName.isNullOrBlank() &&
+                            (it.partyName.equals(tx.partyName, ignoreCase = true) || it.lenderName.equals(tx.partyName, ignoreCase = true))
+                        }
+                    }
+                    if (targetLoan != null) {
+                        loansMap[targetLoan.id] = targetLoan.copy(
+                            outstandingAmount = roundMoney(targetLoan.outstandingAmount + amount)
+                        )
+                    }
                 }
 
                 TransactionType.LOAN_GIVEN -> {
@@ -925,6 +1025,19 @@ object AccountingEngine {
                     if (targetAcc != null) {
                         accountsMap[targetAcc.id] = targetAcc.copy(
                             balance = roundMoney(targetAcc.balance - amount)
+                        )
+                    }
+                    val targetLoan = if (!tx.loanAccountId.isNullOrBlank()) {
+                        loansMap[tx.loanAccountId]
+                    } else {
+                        loansMap.values.find {
+                            !tx.partyName.isNullOrBlank() &&
+                            (it.partyName.equals(tx.partyName, ignoreCase = true) || it.lenderName.equals(tx.partyName, ignoreCase = true))
+                        }
+                    }
+                    if (targetLoan != null) {
+                        loansMap[targetLoan.id] = targetLoan.copy(
+                            outstandingAmount = roundMoney(targetLoan.outstandingAmount + amount)
                         )
                     }
                 }
@@ -935,7 +1048,8 @@ object AccountingEngine {
             bankAccounts = accountsMap.values.toList(),
             customers = customersMap.values.toList(),
             suppliers = suppliersMap.values.toList(),
-            inventory = inventoryMap.values.toList()
+            inventory = inventoryMap.values.toList(),
+            loans = loansMap.values.toList()
         )
     }
 
@@ -1054,9 +1168,8 @@ object AccountingEngine {
                     inflow += tx.amount
                 }
                 TransactionType.PURCHASE -> {
-                    if (tx.paymentMethod != PaymentMethod.CREDIT) {
-                        outflow += tx.amount
-                    }
+                    val cashSpent = tx.cashPaid ?: (if (tx.paymentMethod == PaymentMethod.CREDIT) 0.0 else tx.amount)
+                    outflow += cashSpent
                 }
                 TransactionType.EXPENSE -> {
                     outflow += tx.amount

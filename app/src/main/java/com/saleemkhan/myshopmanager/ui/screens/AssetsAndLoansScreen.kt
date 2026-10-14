@@ -67,6 +67,7 @@ fun AssetsAndLoansScreen(
     var movementAmount by remember { mutableStateOf("") }
     var movementPaymentMethod by remember { mutableStateOf(PaymentMethod.CASH) }
     var movementNotes by remember { mutableStateOf("") }
+    var isSubmittingLoanEntry by remember { mutableStateOf(false) }
 
     // Handle Back Press when inline loan logger is expanded
     BackHandler(enabled = selectedLoanId != null || deleteConfirmId != null) {
@@ -89,12 +90,28 @@ fun AssetsAndLoansScreen(
 
     // Helper for computing loan values dynamically
     fun getLoanOutstanding(loan: LoanRecord): Double {
+        val hasMatchingTx = state.transactions.any {
+            it.loanAccountId == loan.id ||
+                    ((it.type == TransactionType.LOAN_TAKEN || it.category.equals("LOAN_REPAYMENT", ignoreCase = true) || it.category.equals("Loan Repayment", ignoreCase = true)) &&
+                            !it.partyName.isNullOrBlank() &&
+                            (it.partyName.trim().equals(loan.partyName.trim(), ignoreCase = true) || it.partyName.trim().equals(loan.lenderName.trim(), ignoreCase = true)))
+        }
+        if (!hasMatchingTx && loan.outstandingAmount > 0.0) {
+            return loan.outstandingAmount
+        }
         val initialAmount = loan.amount
         val taken = state.transactions
-            .filter { it.type == TransactionType.LOAN_TAKEN && it.loanAccountId == loan.id }
+            .filter {
+                it.type == TransactionType.LOAN_TAKEN &&
+                        (it.loanAccountId == loan.id || (!it.partyName.isNullOrBlank() && (it.partyName.trim().equals(loan.partyName.trim(), ignoreCase = true) || it.partyName.trim().equals(loan.lenderName.trim(), ignoreCase = true))))
+            }
             .sumOf { it.amount }
         val repaid = state.transactions
-            .filter { it.type == TransactionType.PAYMENT && (it.category.equals("LOAN_REPAYMENT", ignoreCase = true) || it.category.equals("Loan Repayment", ignoreCase = true)) && it.loanAccountId == loan.id }
+            .filter {
+                it.type == TransactionType.PAYMENT &&
+                        (it.category.equals("LOAN_REPAYMENT", ignoreCase = true) || it.category.equals("Loan Repayment", ignoreCase = true) || it.loanAccountId == loan.id) &&
+                        (it.loanAccountId == loan.id || (!it.partyName.isNullOrBlank() && (it.partyName.trim().equals(loan.partyName.trim(), ignoreCase = true) || it.partyName.trim().equals(loan.lenderName.trim(), ignoreCase = true))))
+            }
             .sumOf { it.amount }
         return (initialAmount + taken - repaid).coerceAtLeast(0.0)
     }
@@ -1543,8 +1560,30 @@ fun AssetsAndLoansScreen(
 
                                                             Button(
                                                                 onClick = {
+                                                                    if (isSubmittingLoanEntry) return@Button
                                                                     val amt = movementAmount.toDoubleOrNull() ?: 0.0
-                                                                    if (amt > 0) {
+                                                                    if (amt <= 0.0) {
+                                                                        Toast.makeText(
+                                                                            context,
+                                                                            if (isUrdu) "براہ کرم درست رقم درج کریں" else "Please enter a valid amount",
+                                                                            Toast.LENGTH_SHORT
+                                                                        ).show()
+                                                                        return@Button
+                                                                    }
+
+                                                                    // Validation: Repayments must not exceed dynamic outstanding balance
+                                                                    if (movementType == "REPAYMENT" && amt > dynamicOutstanding) {
+                                                                        val err = if (isUrdu) {
+                                                                            "واپسی کی رقم بقایا قرض (${FormatUtils.formatCurrency(dynamicOutstanding)}) سے زیادہ نہیں ہو سکتی"
+                                                                        } else {
+                                                                            "Repayment amount cannot exceed total outstanding balance of ${FormatUtils.formatCurrency(dynamicOutstanding)}"
+                                                                        }
+                                                                        Toast.makeText(context, err, Toast.LENGTH_LONG).show()
+                                                                        return@Button
+                                                                    }
+
+                                                                    isSubmittingLoanEntry = true
+                                                                    try {
                                                                         val txType = if (movementType == "TAKEN") TransactionType.LOAN_TAKEN else TransactionType.PAYMENT
                                                                         val cat = if (movementType == "TAKEN") "LOAN_TAKEN" else "LOAN_REPAYMENT"
                                                                         val note = movementNotes.ifBlank {
@@ -1570,8 +1609,11 @@ fun AssetsAndLoansScreen(
                                                                         movementNotes = ""
                                                                         selectedLoanId = null
                                                                         Toast.makeText(context, if (isUrdu) "انٹری محفوظ ہو گئی" else "Entry Recorded", Toast.LENGTH_SHORT).show()
+                                                                    } finally {
+                                                                        isSubmittingLoanEntry = false
                                                                     }
                                                                 },
+                                                                enabled = !isSubmittingLoanEntry,
                                                                 colors = ButtonDefaults.buttonColors(containerColor = DukanGreenPrimary),
                                                                 shape = RoundedCornerShape(8.dp),
                                                                 modifier = Modifier.height(52.dp)
