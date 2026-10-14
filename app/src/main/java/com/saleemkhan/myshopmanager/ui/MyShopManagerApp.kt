@@ -276,10 +276,6 @@ fun MyShopManagerApp() {
                                             onDismissOnboardingCard = {
                                                 isOnboardingCardDismissed = true
                                                 repository.setOnboardingCardDismissed(true)
-                                            },
-                                            onNavigateToPurchases = {
-                                                transactionsInitialTypeFilter = TransactionType.PURCHASE
-                                                navigateTo(Screen.TRANSACTIONS)
                                             }
                                         )
                                     }
