@@ -941,7 +941,7 @@ fun QuickEntryDialog(
                                                 paymentMethod = actualPaymentMethod,
                                                 partyName = party,
                                                 partyId = supplier?.id,
-                                                date = purchaseDate,
+                                                date = FormatUtils.normalizeToIsoDate(purchaseDate),
                                                 notes = if (purchaseNotes.isNotBlank()) "$desc - $purchaseNotes" else desc,
                                                 itemId = item?.id,
                                                 qtyChange = qty,

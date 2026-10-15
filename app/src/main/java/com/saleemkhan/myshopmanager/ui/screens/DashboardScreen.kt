@@ -69,44 +69,9 @@ fun DashboardScreen(
         if (clean.isBlank() || clean.equals("Today", ignoreCase = true) || clean == "آج") {
             return targetIso == todayIso
         }
-        // Direct match with YYYY-MM-DD prefix or exact match
         if (clean.startsWith(targetIso) || clean == targetIso) return true
-
-        // Check common date string patterns
-        val patterns = listOf(
-            "yyyy-MM-dd",
-            "yyyy/MM/dd",
-            "dd-MM-yyyy",
-            "dd/MM/yyyy",
-            "yyyy-MM-dd'T'HH:mm:ss",
-            "yyyy-MM-dd'T'HH:mm",
-            "dd-MMM-yyyy",
-            "dd MMM yyyy"
-        )
-        for (pattern in patterns) {
-            try {
-                val parser = SimpleDateFormat(pattern, Locale.US)
-                parser.isLenient = true
-                val parsed = parser.parse(clean)
-                if (parsed != null) {
-                    val parsedIso = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(parsed)
-                    if (parsedIso == targetIso) return true
-                }
-            } catch (_: Exception) {}
-        }
-
-        // Handle numeric epoch timestamps
-        clean.toLongOrNull()?.let { ts ->
-            if (ts > 1000000000000L) { // milliseconds
-                val tsIso = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(ts))
-                if (tsIso == targetIso) return true
-            } else if (ts > 1000000000L) { // seconds
-                val tsIso = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(ts * 1000))
-                if (tsIso == targetIso) return true
-            }
-        }
-
-        return false
+        val normalizedIso = FormatUtils.normalizeToIsoDate(clean)
+        return normalizedIso == targetIso
     }
 
     val todayTransactions = remember(state.transactions, todayIso) {

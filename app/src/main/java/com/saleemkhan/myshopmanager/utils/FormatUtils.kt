@@ -109,6 +109,36 @@ object FormatUtils {
         return sdf.format(Date())
     }
 
+    fun normalizeToIsoDate(dateStr: String?): String {
+        if (dateStr.isNullOrBlank()) return getTodayIsoDate()
+        val clean = dateStr.trim()
+        if (clean.equals("Today", ignoreCase = true) || clean == "آج") return getTodayIsoDate()
+        if (clean.length >= 10 && clean.substring(0, 10).matches(Regex("\\d{4}-\\d{2}-\\d{2}"))) {
+            return clean.substring(0, 10)
+        }
+        val patterns = listOf(
+            "yyyy-MM-dd",
+            "yyyy/MM/dd",
+            "dd-MM-yyyy",
+            "dd/MM/yyyy",
+            "yyyy-MM-dd'T'HH:mm:ss",
+            "yyyy-MM-dd'T'HH:mm",
+            "dd-MMM-yyyy",
+            "dd MMM yyyy"
+        )
+        for (p in patterns) {
+            try {
+                val parser = SimpleDateFormat(p, Locale.US)
+                parser.isLenient = true
+                val parsed = parser.parse(clean)
+                if (parsed != null) {
+                    return SimpleDateFormat("yyyy-MM-dd", Locale.US).format(parsed)
+                }
+            } catch (_: Exception) {}
+        }
+        return getTodayIsoDate()
+    }
+
     fun formatDisplayDate(dateStr: String?): String {
         if (dateStr.isNullOrBlank()) return ""
         return try {
