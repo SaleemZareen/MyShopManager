@@ -37,6 +37,7 @@ import androidx.compose.ui.window.DialogProperties
 import com.saleemkhan.myshopmanager.model.*
 import com.saleemkhan.myshopmanager.ui.theme.*
 import com.saleemkhan.myshopmanager.utils.FormatUtils
+import java.util.UUID
 
 data class PosCartItem(
     val item: InventoryItem,
@@ -242,7 +243,7 @@ fun QuickEntryDialog(
             val party = customer?.name ?: (if (isUrdu) "گاہک وصولی" else "Customer Recovery")
             val desc = "Udhaar Recovery from $party"
             val newTx = Transaction(
-                id = editingTransaction?.id ?: "tx_${System.currentTimeMillis()}",
+                id = editingTransaction?.id ?: "tx_${UUID.randomUUID()}",
                 type = TransactionType.RECEIPT,
                 amount = amt,
                 category = "Udhaar Recovery",
@@ -781,7 +782,7 @@ fun QuickEntryDialog(
                                                 val avcoUnitCost = if (totalQty > 0) totalCost / totalQty else (cartItems.firstOrNull()?.item?.purchasePrice ?: 0.0)
 
                                                 val newTx = Transaction(
-                                                    id = editingTransaction?.id ?: "tx_${System.currentTimeMillis()}",
+                                                    id = editingTransaction?.id ?: "tx_${UUID.randomUUID()}",
                                                     type = TransactionType.SALE,
                                                     amount = netSaleTotal,
                                                     category = cartItems.firstOrNull()?.item?.category ?: "Sale",
@@ -836,7 +837,7 @@ fun QuickEntryDialog(
                                                 val desc = "Quick Direct Sale"
 
                                                 val newTx = Transaction(
-                                                    id = editingTransaction?.id ?: "tx_${System.currentTimeMillis()}",
+                                                    id = editingTransaction?.id ?: "tx_${UUID.randomUUID()}",
                                                     type = TransactionType.SALE,
                                                     amount = netSaleTotal,
                                                     category = "Direct Sale",
@@ -934,7 +935,7 @@ fun QuickEntryDialog(
 
                                             val netPurchaseUnitCost = if (qty > 0) totalCost / qty else cost
                                             val newTx = Transaction(
-                                                id = editingTransaction?.id ?: "tx_${System.currentTimeMillis()}",
+                                                id = editingTransaction?.id ?: "tx_${UUID.randomUUID()}",
                                                 type = TransactionType.PURCHASE,
                                                 amount = totalCost,
                                                 category = item?.category ?: "Purchase",
@@ -1004,7 +1005,7 @@ fun QuickEntryDialog(
                                             val selectedAcc = state.bankAccounts.find { it.id == expenseAccountId }
                                             val payMethod = if (selectedAcc?.type == "BANK") PaymentMethod.BANK else PaymentMethod.CASH
                                             val newTx = Transaction(
-                                                id = editingTransaction?.id ?: "tx_${System.currentTimeMillis()}",
+                                                id = editingTransaction?.id ?: "tx_${UUID.randomUUID()}",
                                                 type = TransactionType.EXPENSE,
                                                 amount = amt,
                                                 category = expenseCategory,
@@ -1149,7 +1150,7 @@ fun QuickEntryDialog(
                                             val party = supplier?.name ?: (if (isUrdu) "سپلائر ادائیگی" else "Supplier Payment")
                                             val desc = "Payment to $party"
                                             val newTx = Transaction(
-                                                id = editingTransaction?.id ?: "tx_${System.currentTimeMillis()}",
+                                                id = editingTransaction?.id ?: "tx_${UUID.randomUUID()}",
                                                 type = TransactionType.PAYMENT,
                                                 amount = amt,
                                                 category = "Supplier Payment",
@@ -1214,7 +1215,7 @@ fun QuickEntryDialog(
                                             val toAcc = state.bankAccounts.find { it.id == transferToAccountId }
                                             val desc = "Transfer from ${fromAcc?.accountTitle ?: "Account"} to ${toAcc?.accountTitle ?: "Account"}"
                                             val newTx = Transaction(
-                                                id = editingTransaction?.id ?: "tx_${System.currentTimeMillis()}",
+                                                id = editingTransaction?.id ?: "tx_${UUID.randomUUID()}",
                                                 type = TransactionType.TRANSFER,
                                                 amount = amt,
                                                 category = "Fund Transfer",
@@ -1268,7 +1269,7 @@ fun QuickEntryDialog(
                                             }
                                             val desc = "${if (isGiven) "Loan Given to" else "Loan Taken from"} $loanPartyName"
                                             val newTx = Transaction(
-                                                id = editingTransaction?.id ?: "tx_${System.currentTimeMillis()}",
+                                                id = editingTransaction?.id ?: "tx_${UUID.randomUUID()}",
                                                 type = if (isGiven) TransactionType.LOAN_GIVEN else TransactionType.LOAN_TAKEN,
                                                 amount = amt,
                                                 category = if (isGiven) "Loan Given" else "Loan Taken",
@@ -5446,7 +5447,7 @@ fun QuickAddItemDialog(
                                 return@Button
                             }
                             val newItem = InventoryItem(
-                                id = "inv_${System.currentTimeMillis()}",
+                                id = "inv_${UUID.randomUUID()}",
                                 name = name.trim(),
                                 category = category.ifBlank { "General" },
                                 purchasePrice = cp,
