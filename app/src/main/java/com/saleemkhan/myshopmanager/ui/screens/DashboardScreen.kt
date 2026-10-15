@@ -60,14 +60,15 @@ fun DashboardScreen(
 ) {
     val taxSummary = remember(state) { TaxEngine.calculateFbrSummary(state) }
 
-    // Reference date & normalized ISOs for Today and Yesterday
-    val referenceDate = remember { Date() }
-    val todayIso = remember(referenceDate) { FormatUtils.getTodayIsoDate() }
-    val yesterdayIso = remember(referenceDate) { AccountingEngine.getYesterdayIsoDate(referenceDate) }
+    // Reference date & normalized ISOs for Today and Yesterday (refreshed with transaction updates)
+    val todayIso = remember(state.transactions) { FormatUtils.getTodayIsoDate() }
+    val yesterdayIso = remember(state.transactions) { AccountingEngine.getYesterdayIsoDate(Date()) }
 
     fun matchesDay(dateStr: String, targetIso: String): Boolean {
         val clean = dateStr.trim()
-        if (clean.isBlank()) return false
+        if (clean.isBlank() || clean.equals("Today", ignoreCase = true) || clean == "آج") {
+            return targetIso == todayIso
+        }
         // Direct match with YYYY-MM-DD prefix or exact match
         if (clean.startsWith(targetIso) || clean == targetIso) return true
 
